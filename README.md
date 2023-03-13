@@ -7,12 +7,14 @@ This repo contains materials for getting started on Numerai's ML problems. Topic
 ## Convex optimisation
 
 ### Portfolio maximisation formulation
-Read through the [ipython notebook](https://github.com/cvxgrp/cvx_short_course/blob/master/applications/portfolio_optimization.ipynb) from [Boyd's Stanford short course](https://web.stanford.edu/~boyd/papers/cvx_short_course.html).
+Read through the [ipython notebook](https://github.com/cvxgrp/cvx_short_course/blob/master/applications/portfolio_optimization.ipynb) from [Boyd's Stanford short course](https://web.stanford.edu/~boyd/papers/cvx_short_course.html). The following is almost an exact rewrite of the notebook.
 
 We formulate the portfolio allocation across a set of assets as a convex optimisation problem where we want to maximise return and minimise risk.
 
 We have a fixed budget normalised to $\mathbf{1}$ and $\mathbf{1}^T w = 1$ where $w$ is the allocation to each stock. If $w \in R_+$ then we have long only positions.
+
 $$\text{leverage} = ||w||_1 = \mathbf{1}^Tw_+ + \mathbf{1}^T w_-$$
+
 We can short sell and use that money to go long. So we can technically invest more than our total budget.
 
 #### Asset return
@@ -39,7 +41,7 @@ Above, we approximate the portfolio return by a normal distribution. We can now 
 ![](assets/images/readme/cvx_risk_retn_dist.svg)
 
 #### Other constraints
-1. Max leverage constraint $||w||_1 < L_{max}$. As we increase leverage, we can
+1. Max leverage constraint $|w|_1 < L^{max}$. As we increase leverage, we can
    get higher returns for the same risk (defined by stddev). Also higher leverage allows
    us to take higher risks. ![](assets/images/readme/cvx_risk_retn_leverage_max.svg)
 2. Set max leverage and max risk as constraints and optimise return.
@@ -76,6 +78,7 @@ exposures of the fractional assets in the portfolio. To be factor neutral across
 we need $(F^T_{[k\times n]} w_{[n\times 1]})_j=0, \; \forall j \in [1, k]$.
 
 ##### Formulation
+
 $$\begin{align*}
     \argmax_{w} \mathbf{\mu^T} w &- \gamma \left\{(F^Tw)^T \tilde \Sigma (F^Tw) + w^T D w\right\} \\
     \implies \argmax_{w} \mathbf{\mu^T} w &- \gamma \left\{f^T \tilde \Sigma f + w^T D w\right\} \\
@@ -83,6 +86,7 @@ $$\begin{align*}
     \mathbf{1}^Tw=1,\;  &w\in \mathcal{W}, f \in \mathcal{F}
 \end{align*}
 $$
+
 Computational complexity to solve the problem falls from $O(n^3)$ to $O(nk^2)$.
 
 In order to leverage this we define the problem like below
@@ -148,9 +152,7 @@ print(prob_factor.solver_stats.solve_time)
 
 ## Ideas / Open Questions
 
-WKT that diversification reduces portfolio risk (variance) even when using stocks with
-the same expected return and same induvidual variances (as long as they are not
-perfectly correlated). Can we incorporate this risk computation in the loss function
-optimised by GBT?
-
-Can we use sharpe ratio as the GBT loss function?
+WKT that diversification reduces portfolio risk (variance) even when choosing amongst assets with
+the same expected return and same variances (as long as they are not perfectly correlated).
+Could we incorporate this risk computation in the loss function optimised by GBT? Can we use
+sharpe ratio as the GBT loss function?
