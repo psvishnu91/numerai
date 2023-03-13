@@ -31,7 +31,7 @@ $$\begin{align*}
     \text{such that,    } \mathbf{1^Tw}=1 &, w \in \mathcal{W}
 \end{align*}$$
 
-#### Expectations
+#### Risk vs Return trade-off curve
 Here $\gamma > 0$ is the **risk aversion factor**. As we increase $\gamma$ and our risk aversion, our expected return will diminish along with risk. We can trace that curve and choose what we determine as the optimal *risk-return trade-off*.
 
 ![](assets/images/readme/cvx_risk_retn_tradeoff.svg)
@@ -44,7 +44,8 @@ Above, we approximate the portfolio return by a normal distribution. We can now 
 1. Max leverage constraint $|w|_1 < L^{max}$. As we increase leverage, we can
    get higher returns for the same risk (defined by stddev). Also higher leverage allows
    us to take higher risks. ![](assets/images/readme/cvx_risk_retn_leverage_max.svg)
-2. Set max leverage and max risk as constraints and optimise return.
+2. Set max leverage and max risk as constraints and optimise return. Here we show
+   optimal asset allocations for different maximum leverage for a fixed max risk.
    ![](assets/images/readme/cvx_allocn_fixed_risk.svg)
 3. Market neutral constraint. We want the portfolio returns to be uncorrelated with the
     market returns. $m^T \Sigma w = 0$  where $m_i$ is the capitalisation of the asset
@@ -68,10 +69,10 @@ In a factor covariance model, we assume
 2. Individual stocks are not directly correlated with other stocks but only indirectly
    through their factors.
 
-We can thus factorise the Covariance matrix $\Sigma$ as $\Sigma =  F \tilde\Sigma F^T + D =  F_{[n\times k]} \tilde\Sigma_{[k \times k])} F^T_{[k \times n]} + D_{[n \times n]}$, where 
-- $F$ is the _factor loading matrix_ and $F_{ij}$ is the loading of asset $i$ to factor $j$ and
-- $D$ is a diagonal matrix where $D_{ii}>0$ with the individual risk of each stock independent of the factor covariance.
-- $\tilde\Sigma_{(k \times k)} > 0$ is the factor covariance matrix (positive definite)
+We can thus factorise the Covariance matrix $\Sigma$ as $\Sigma =  F \tilde\Sigma F^T + D =  F_{[n\times k]} \tilde\Sigma_{[k \times k]} F^T_{[k \times n]} + D_{[n \times n]}$, where 
+- $F_{[n\times k]}$ is the _factor loading matrix_ and $F_{ij}$ is the loading of asset $i$ to factor $j$ and
+- $D_{[n \times n]}$ is a diagonal matrix where $D_{ii}>0$ with the individual risk of each stock independent of the factor covariance.
+- $\tilde\Sigma_{[k \times k]} > 0$ is the factor covariance matrix (positive definite)
 
 Portfolio factor exposure: $f = F^T w \in R^k$. This is a linear weighted sum of the factor
 exposures of the fractional assets in the portfolio. To be factor neutral across all factors,
@@ -79,9 +80,10 @@ we need $(F^T_{[k\times n]} w_{[n\times 1]})_j=0, \; \forall j \in [1, k]$.
 
 ##### Formulation
 
-$$\begin{align*}
-    \argmax_{w} \mathbf{\mu^T} w &- \gamma \left\{(F^Tw)^T \tilde \Sigma (F^Tw) + w^T D w\right\} \\
-    \implies \argmax_{w} \mathbf{\mu^T} w &- \gamma \left\{f^T \tilde \Sigma f + w^T D w\right\} \\
+$$
+\begin{align*}
+    \argmax_{w} \mathbf{\mu^T} w &- \gamma \left[(F^Tw)^T \tilde \Sigma (F^Tw) + w^T D w\right] \\
+    \implies \argmax_{w} \mathbf{\mu^T} w &- \gamma \left[f^T \tilde \Sigma f + w^T D w\right] \\
     \text{such that, }f_{[k\times 1]} &= F^Tw \\
     \mathbf{1}^Tw=1,\;  &w\in \mathcal{W}, f \in \mathcal{F}
 \end{align*}
