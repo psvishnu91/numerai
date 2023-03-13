@@ -82,8 +82,8 @@ we need $(F^T_{[k\times n]} w_{[n\times 1]})_j=0, \; \forall j \in [1, k]$.
 
 $$
 \begin{align*}
-    \argmax_{w} \mathbf{\mu^T} w &- \gamma \left[(F^Tw)^T \tilde \Sigma (F^Tw) + w^T D w\right] \\
-    \implies \argmax_{w} \mathbf{\mu^T} w &- \gamma \left[f^T \tilde \Sigma f + w^T D w\right] \\
+    \arg \max_{w} \mathbf{\mu^T} w &- \gamma \left[(F^Tw)^T \tilde \Sigma (F^Tw) + w^T D w\right] \\
+    \implies \arg \max_{w} \mathbf{\mu^T} w &- \gamma \left[f^T \tilde \Sigma f + w^T D w\right] \\
     \text{such that, }f_{[k\times 1]} &= F^Tw \\
     \mathbf{1}^Tw=1,\;  &w\in \mathcal{W}, f \in \mathcal{F}
 \end{align*}
