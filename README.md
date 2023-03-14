@@ -7,7 +7,12 @@ This repo contains materials for getting started on Numerai's ML problems. Topic
 ## Convex optimisation
 
 ### Portfolio maximisation formulation
-Read through the [ipython notebook](https://github.com/cvxgrp/cvx_short_course/blob/master/applications/portfolio_optimization.ipynb) from [Boyd's Stanford short course](https://web.stanford.edu/~boyd/papers/cvx_short_course.html). The following is almost an exact rewrite of the notebook.
+Read through
+* the [ipython notebook](https://github.com/cvxgrp/cvx_short_course/blob/master/applications/portfolio_optimization.ipynb) from [Boyd's Stanford short course](https://web.stanford.edu/~boyd/papers/cvx_short_course.html)
+* [slides](https://web.stanford.edu/~boyd/papers/pdf/cvx_applications.pdf) on the application
+  of convex optimisation.
+
+The following is almost an exact rewrite of the notebook.
 
 We formulate the portfolio allocation across a set of assets as a convex optimisation problem where we want to maximise return and minimise risk.
 
