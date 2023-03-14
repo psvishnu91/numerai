@@ -4,6 +4,13 @@ This repo contains materials for getting started on Numerai's ML problems. Topic
 1. Convex optimisation
 2. ML modelling of numerai tournament
 
+## Resources
+### Convex optimisation for portfolio allocation
+1. [Ipython notebook](https://github.com/cvxgrp/cvx_short_course/blob/master/applications/portfolio_optimization.ipynb) from [Boyd's Stanford short course](https://web.stanford.edu/~boyd/papers/cvx_short_course.html)
+2. [Slides](https://web.stanford.edu/~boyd/papers/pdf/cvx_applications.pdf) on the application
+  of convex optimisation.
+3. Linear algebra [Quadratic form](https://sites.millersville.edu/rumble/Math.422/quadform.pdf) 
+
 ## Convex optimisation
 
 ### Portfolio maximisation formulation
