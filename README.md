@@ -3,6 +3,7 @@
 This repo contains materials for getting started on Numerai's ML problems. Topics include
 1. Convex optimisation
 2. ML modelling of numerai tournament
+3. Quant Club notes
 
 ## Resources
 ### Convex optimisation for portfolio allocation
@@ -164,9 +165,144 @@ print(prob_factor.solver_stats.solve_time)
 ```
 </details>
 
+## Numerai modelling
+
+### Learnings from loading data
+_(Updated: 21st March 2023)_
+
+* There are several versions of data, the most recent one being `v4.1`.
+* Three types of datasets
+  
+  | Data split | Rows | Features | Eras         | Notes                                      |
+  | ---------- | ---- | -------- | ------------ | ------------------------------------------ |
+  | Training   | 2.4M | ~1600    | [0, 574]     | Pandas df: 7.5GB, forums contain xval code |
+  | Validation | 2.4M | ~1600    | [575, 1054]  | Pandas df: 7.5GB, this is the test data    |
+  | Live       | 5k   | ~1600    | current week | Most recent week's data to predict on      |
+* Each training row or validation row is indexed by (era, stock_id). Eras are incremented
+  every week.
+* `features.json` file contains 
+  1. `targets`: These are simply the target column names. The `target` column points to
+    `target_nomi_v4_20`. We can train on multiple targets and build a meta model to
+    predict on final target.
+
+    | Target type | Number of targets |
+    | ----------- | ----------------- |
+    | All         | 28                |
+    | 20 day      | 14                |
+    | 60 day      | 14                |
+  2. `feature_sets`: Provides preset features that we can use to quickly bootstrap
+  modelling on a smaller feature set or previous versions' feature sets.
+
+  | Feature set            | Count |
+  | ---------------------- | ----- |
+  | small                  | 32    |
+  | medium                 | 641   |
+  | v2_equivalent_features | 304   |
+  | v3_equivalent_features | 1040  |
+  | fncv3_features         | 416   |
+  3. `feature_stats`: Contains useful correlation information to rank features. We can
+   load up the feature stats in a pandas dataframe with 
+   `pd.DataFrame(features_json["feature_stats"])`. Example output
+
+   |                                          | feature_honoured_observational_balaamite | feature_polaroid_vadose_quinze |     ... |
+   | :--------------------------------------- | ---------------------------------------: | -----------------------------: | ------: |
+   | legacy_uniqueness                        |                                      nan |                            nan |     ... |
+   | spearman_corr_w_target_nomi_20_mean      |                             -0.000868326 |                    0.000162301 |     ... |
+   | spearman_corr_w_target_nomi_20_sharpe    |                                -0.084973 |                      0.0161156 |     ... |
+   | spearman_corr_w_target_nomi_20_reversals |                              7.04619e-05 |                    8.11128e-05 |     ... |
+   | spearman_corr_w_target_nomi_20_autocorr  |                                0.0326726 |                     -0.0128228 |     ... |
+   | spearman_corr_w_target_nomi_20_arl       |                                  3.92019 |                        3.55319 | ... |
+
+### Code snippets
+
+#### Downloading data
+``` python
+def download_data(cur_round=None, version="v4.1"):
+    """Downloads training, validation and tournament-live data.
+    
+    It stores them in the following folder structure
+    
+        data/v4.1/train_int8.parquet
+        data/v4.1/validation_int8.parquet
+        data/444/v4.1/live_int8.parquet
+        data/v4.1/features.json
+    """
+    fl_to_path = {}
+    cur_round = cur_round or napi.get_current_round()
+    Path(f"data/{cur_round}").mkdir(exist_ok=True, parents=True)
+    fl_to_downpath = {
+        f"{version}/live_int8.parquet": f"data/{cur_round}/{version}/live_int8.parquet",
+        f"{version}/train_int8.parquet": f"data/{version}/train_int8.parquet",
+        f"{version}/validation_int8.parquet":  f"data/{version}/validation_int8.parquet",
+        f"{version}/features.json": f"data/{version}/features.json",
+    }
+    for filename, dest_path in fl_to_downpath.items():
+        napi.download_dataset(filename=filename, dest_path=dest_path)
+    print(f"Current round: \t{cur_round}\n")
+    downd_fls = '\n\t'.join(str(pt) for pt in Path('data').rglob('*.*'))
+    print(f"Downloaded files: \n\t{downd_fls}")
+    return cur_round, fl_to_downpath
+```
+
 ## Ideas / Open Questions
 
 WKT that diversification reduces portfolio risk (variance) even when choosing amongst assets with
 the same expected return and same variances (as long as they are not perfectly correlated).
 Could we incorporate this risk computation in the loss function optimised by GBT? Can we use
 sharpe ratio as the GBT loss function?
+
+
+## Quant club notes
+
+### 22 Mar 2023
+
+#### Normalisation
+
+Weighted average signal is passed to the optimiser. no neutralisation is done. The
+constraints forces neutralisation. Even if signal is neutral, the portfolio may not be
+neutral and hence constraints need to be specified at a portfolio level.
+
+#### New targets?
+
+New targets are going to be shared. Moving away from rank correlation to
+pearson corr, makes the predictions guassianised. With the new metric we can get a perfect
+corr of 1.
+
+#### New targets closer to TC?
+- Some metrics are easier to compute now that you have access to the meta model score.
+
+#### Hitting max capacity with higher AUMs
+- Any update on max capacity?
+- Max capacity decreases with increasing AUM. Gradual and smooth shift. No clear fall off.
+- Daily trading can help here.
+- Hoping to get to 1B\$ AUM by end of the year. Still have headroom
+
+### Main talk: LightGBM settings
+- Interesting settings in lightgbm. Some of them have similar settings in xgb but not
+    all settings.
+  - _**Monotone constraints**_: A list [1,-1,0] length, length of feature. You can enforce
+    that this feature should always be monotonically increasing or decreasing.
+    Especially for composite features.Now there are more advanced papers but are similar.
+    mdo's experience: They don't necessarily help with raw model performance but can help
+    with sharpe, TC regularisation.
+  - _**Linear tree**_: Builds a linear model at the end of the space. Makes the model
+    more linear at the end where it flattens out. There are several lambda params to
+    regularise these. Possible in `lightGBM` and not in xgb.
+
+
+### XGB as a feature selection & weighting (OHE)
+
+* XGB Discretisation and weighting of features.
+* Imagine 5-depth binary DT classification. Splits into 2^5 32 bins. Mixed bins with roughly equal counts 0.5 predictions.
+* For pure data bins like the one numerai dataset. If it has very high tree leaf weight but very few datapoints then might not generalise.
+* But with ensembling you learn a series of features and feature spaces. You get an output an one hot encoded output for each leaf.
+* XGB let's you dump the model `get_dump` function. You can convert the xgboost model prediction to a python code. We can compute the leaves. At the end of xgb, you can think of a DNN, it throws a weighting on input space and creates an embedding.
+* XGB has an apply function which returns the index of the nodes in the output. If input is n,p features and and you fit T trees, then the output is n x T, where each entry in T is the tree node. Now you can create a OHE of the features. n x (T x num_leaves). num_leaves 100*2^5=3200.
+* If you had leaf weights times the OHE features you will get the prediction of the xgboost model.
+* The plot of feature values is the average value of parameters for each subspace. The spikes in the spaces could be useful space or could be noise. 
+* Most average parameter space is close to 0. The instances are highly non-separable so the impact is almost 0 for most cases.
+* On the final features you could do linear regression.
+* L1 leaves which are small perhaps shrink those to zero. 
+* Shrink the spaces with fewer number of datapoints than spaces with larger number of datapoints. Shrink by 1/sqrt(n) (confidence interval/margin). Shrink out the high variance leaves.
+* 1/sqrt shrinking better correlated with unshrinked output from xgb than unweighted L1.
+* Unweighted L1 improved sharpe by decreasing variance. However the expected gain dropped sharply. The weighted L1 had a much more modest drop in expected gain by retaining most of the variance wins.
