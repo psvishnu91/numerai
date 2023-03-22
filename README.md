@@ -256,28 +256,29 @@ sharpe ratio as the GBT loss function?
 
 ### 22 Mar 2023
 
-#### Normalisation
+#### Questions
+##### Normalisation
 
 Weighted average signal is passed to the optimiser. no neutralisation is done. The
 constraints forces neutralisation. Even if signal is neutral, the portfolio may not be
 neutral and hence constraints need to be specified at a portfolio level.
 
-#### New targets?
+##### New targets?
 
 New targets are going to be shared. Moving away from rank correlation to
 pearson corr, makes the predictions guassianised. With the new metric we can get a perfect
 corr of 1.
 
-#### New targets closer to TC?
+##### New targets closer to TC?
 - Some metrics are easier to compute now that you have access to the meta model score.
 
-#### Hitting max capacity with higher AUMs
+##### Hitting max capacity with higher AUMs
 - Any update on max capacity?
 - Max capacity decreases with increasing AUM. Gradual and smooth shift. No clear fall off.
 - Daily trading can help here.
 - Hoping to get to 1B\$ AUM by end of the year. Still have headroom
 
-### Main talk: LightGBM settings
+#### Main talk: LightGBM settings
 - Interesting settings in lightgbm. Some of them have similar settings in xgb but not
     all settings.
   - _**Monotone constraints**_: A list [1,-1,0] length, length of feature. You can enforce
@@ -290,7 +291,7 @@ corr of 1.
     regularise these. Possible in `lightGBM` and not in xgb.
 
 
-### XGB as a feature selection & weighting (OHE)
+#### Main talk: XGB as a feature selection & weighting (OHE)
 
 * XGB Discretisation and weighting of features.
 * Imagine 5-depth binary DT classification. Splits into 2^5 32 bins. Mixed bins with roughly equal counts 0.5 predictions.
