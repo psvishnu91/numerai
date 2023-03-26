@@ -178,7 +178,7 @@ _(Updated: 21st March 2023)_
   | Training   | 2.4M | ~1600    | [0, 574]     | Pandas df: 7.5GB, forums contain xval code |
   | Validation | 2.4M | ~1600    | [575, 1054]  | Pandas df: 7.5GB, this is the test data    |
   | Live       | 5k   | ~1600    | current week | Most recent week's data to predict on      |
-* Each training row or validation row is indexed by (era, stock_id). Eras are incremented
+* Each training row or validation row is indexed by `(era, stock_id)`. Eras are incremented
   every week.
 * `features.json` file contains 
   1. `targets`: These are simply the target column names. The `target` column points to
@@ -212,6 +212,26 @@ _(Updated: 21st March 2023)_
    | spearman_corr_w_target_nomi_20_reversals |                              7.04619e-05 |                    8.11128e-05 |     ... |
    | spearman_corr_w_target_nomi_20_autocorr  |                                0.0326726 |                     -0.0128228 |     ... |
    | spearman_corr_w_target_nomi_20_arl       |                                  3.92019 |                        3.55319 | ... |
+
+    Below is a table that looks at the overlap of the top 100 features according to
+    different statistics with the preset feature sets provided by numerai
+    
+    | statistic                               | feature set            | overlap | feature set size | Percent overlap with fset |
+    | --------------------------------------- | ---------------------- | ------- | ---------------- | ------------------------- |
+    | corr_w_target_nomi_20_mean     | small                  | 9       | 32               | 28%                       |
+    | corr_w_target_nomi_20_mean     | medium                 | 42      | 641              | 7%                        |
+    | corr_w_target_nomi_20_mean     | v2_equivalent_features | 40      | 304              | 13%                       |
+    | *                                       |                        |         |                  |                           |
+    | corr_w_target_nomi_20_autocorr | small                  | 3       | 32               | 9%                        |
+    | corr_w_target_nomi_20_autocorr | medium                 | 33      | 641              | 5%                        |
+    | corr_w_target_nomi_20_autocorr | v2_equivalent_features | 16      | 304              | 5%                        |
+    | *                                       |                        |         |                  |                           |
+    | corr_w_target_nomi_20_arl      | small                  | 1       | 32               | 3%                        |
+    | corr_w_target_nomi_20_arl      | medium                 | 46      | 641              | 7%                        |
+    | corr_w_target_nomi_20_arl      | v2_equivalent_features | 8       | 304              | 3%                        |
+
+    Sharpe correlation is similar to `corr_mean` and `corr_reversals` has a small overlap similar to
+    `corr_arl`.
 
 ### Code snippets
 
