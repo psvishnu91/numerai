@@ -180,7 +180,11 @@ _(Updated: 21st March 2023)_
   | Live       | 5k   | ~1600    | current week | Most recent week's data to predict on      |
 * Each training row or validation row is indexed by `(era, stock_id)`. Eras are incremented
   every week.
-* `features.json` file contains 
+
+#### `features.json` file
+
+Contains 
+
   1. `targets`: These are simply the target column names. The `target` column points to
     `target_nomi_v4_20`. We can train on multiple targets and build a meta model to
     predict on final target.
@@ -190,6 +194,7 @@ _(Updated: 21st March 2023)_
     | All         | 28                |
     | 20 day      | 14                |
     | 60 day      | 14                |
+
   2. `feature_sets`: Provides preset features that we can use to quickly bootstrap
   modelling on a smaller feature set or previous versions' feature sets.
 
@@ -204,13 +209,13 @@ _(Updated: 21st March 2023)_
    load up the feature stats in a pandas dataframe with 
    `pd.DataFrame(features_json["feature_stats"])`. Example output
 
-   |                                          | feature_honoured_observational_balaamite | feature_polaroid_vadose_quinze |     ... |
-   | :--------------------------------------- | ---------------------------------------: | -----------------------------: | ------: |
-   | legacy_uniqueness                        |                                      nan |                            nan |     ... |
-   | spearman_corr_w_target_nomi_20_mean      |                             -0.000868326 |                    0.000162301 |     ... |
-   | spearman_corr_w_target_nomi_20_sharpe    |                                -0.084973 |                      0.0161156 |     ... |
-   | spearman_corr_w_target_nomi_20_reversals |                              7.04619e-05 |                    8.11128e-05 |     ... |
-   | spearman_corr_w_target_nomi_20_autocorr  |                                0.0326726 |                     -0.0128228 |     ... |
+   |                                          | feature_honoured_observational_balaamite | feature_polaroid_vadose_quinze | ... |
+   | :--------------------------------------- | ---------------------------------------: | -----------------------------: | --: |
+   | legacy_uniqueness                        |                                      nan |                            nan | ... |
+   | spearman_corr_w_target_nomi_20_mean      |                             -0.000868326 |                    0.000162301 | ... |
+   | spearman_corr_w_target_nomi_20_sharpe    |                                -0.084973 |                      0.0161156 | ... |
+   | spearman_corr_w_target_nomi_20_reversals |                              7.04619e-05 |                    8.11128e-05 | ... |
+   | spearman_corr_w_target_nomi_20_autocorr  |                                0.0326726 |                     -0.0128228 | ... |
    | spearman_corr_w_target_nomi_20_arl       |                                  3.92019 |                        3.55319 | ... |
 
     Below is a table that looks at the overlap of the top 100 features according to
@@ -233,9 +238,15 @@ _(Updated: 21st March 2023)_
     Sharpe correlation is similar to `corr_mean` and `corr_reversals` has a small overlap similar to
     `corr_arl`.
 
-### Code snippets
+#### Target distribution
+See [github gist](https://gist.github.com/psvishnu91/c1360eb9cc5dfe48854c5696c71f5265)
+for generating the plot below.
+
+<img src="./assets/images/readme/target_dist.png" width="30%"/>
 
 #### Downloading data
+See the script `download_numerai_dataset.py` in this folder.
+
 ``` python
 def download_data(cur_round=None, version="v4.1"):
     """Downloads training, validation and tournament-live data.
@@ -247,7 +258,6 @@ def download_data(cur_round=None, version="v4.1"):
         data/444/v4.1/live_int8.parquet
         data/v4.1/features.json
     """
-    fl_to_path = {}
     cur_round = cur_round or napi.get_current_round()
     Path(f"data/{cur_round}").mkdir(exist_ok=True, parents=True)
     fl_to_downpath = {
@@ -263,6 +273,17 @@ def download_data(cur_round=None, version="v4.1"):
     print(f"Downloaded files: \n\t{downd_fls}")
     return cur_round, fl_to_downpath
 ```
+
+### Model metrics
+
+#### Cross validation
+We need custom cross validation code because
+1. we want an entire era to act as a group that either appears in training or in the 
+   validation split
+2. we only want to use past eras as training and never train on future eras and test on
+   past eras.
+
+See mdo's post for an [implementation](https://forum.numer.ai/t/era-wise-time-series-cross-validation/791?u=visp).
 
 ## Ideas / Open Questions
 
