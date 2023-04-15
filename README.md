@@ -285,13 +285,6 @@ We need custom cross validation code because
 
 See mdo's post for an [implementation](https://forum.numer.ai/t/era-wise-time-series-cross-validation/791?u=visp).
 
-## Ideas / Open Questions
-
-WKT that diversification reduces portfolio risk (variance) even when choosing amongst assets with
-the same expected return and same variances (as long as they are not perfectly correlated).
-Could we incorporate this risk computation in the loss function optimised by GBT? Can we use
-sharpe ratio as the GBT loss function?
-
 
 ## Quant club notes
 
