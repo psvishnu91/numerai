@@ -9,6 +9,7 @@ __pycache__/
 **/mlruns/
 **/models/
 **/*.csv
+**/*.pkl
 
 # C extensions
 *.so
