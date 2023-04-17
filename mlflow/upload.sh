@@ -12,5 +12,4 @@ scp -i ${PEM_FILE} ${LOCAL_CRED_FL} "${EC2_LOGIN}:~/credentials"
 # Upload script to setup the ec2 instance
 scp -i ${PEM_FILE} setup_mlflow.sh "${EC2_LOGIN}:~/"
 scp -i ${PEM_FILE} run_mlflow.sh "${EC2_LOGIN}:~/"
-scp -i ${PEM_FILE} Dockerfile "${EC2_LOGIN}:~/"
 ssh -i ${PEM_FILE} "${EC2_LOGIN}"

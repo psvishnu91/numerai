@@ -23,7 +23,8 @@ Even better if you can build it inside an ec2 instance and upload but I had issu
 If you have to do it in a mac.
 
 ``` shell
-docker build --platform linux/amd64 -t vishnups/mlflow-visp .
+docker buildx create --use
+docker buildx build --platform linux/amd64,linux/arm64 -t vishnups/mlflow-visp .
 docker push vishnups/mlflow-visp
 ```
 
@@ -49,3 +50,8 @@ with mlflow.start_run(run_name="expt_2"):
 ## Output
 <img src="./output_mlflow.png" width="60%"/>
 <img src="./output_artifact.png" width="60%"/>
+
+## Bake the AMI
+To prevent having to rerun this script many times, I baked this. See
+[AWS docs](https://docs.aws.amazon.com/toolkit-for-visual-studio/latest/user-guide/tkv-create-ami-from-instance.html)
+for details.
