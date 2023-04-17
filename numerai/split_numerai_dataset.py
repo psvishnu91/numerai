@@ -6,17 +6,31 @@ uploads them to s3.
 
 .. note:: We will treat the numerai validation dataset as test.
 
-It stores them in the following folder structure
+If running on AWS EC2, use ``r5a.xlarge`` or larger.
+
+The files are downloaded as below::
+
+    # metadata file contains the min, max eras of each split along with num rows.
+    data_path/splits_folder/metadata.json
+    data_path/splits_folder/train_p0-60{_int8}.parquet
+    data_path/splits_folder/val_p60-80.parquet
+    data_path/splits_folder/train_p0-100_test_p0-80.parquet
 
 Usage::
-    
-    python download_numerai_dataset.py --version v4.1
+
+    python split_numerai_dataset.py \
+        --version v4.1 \
+        --data-path data/ \
+        --s3-path s3://numerai-v1/dataset/ \
+        --aws-credentials ~/.aws/personal_credentials \
+        --s3-dry-run
 """
 import argparse
 import dataclasses as dc
 import gc
 import logging
 import os.path
+import pandas as pd
 
 import numerapi
 import nmr_utils as nu
@@ -92,6 +106,7 @@ class Datasets:
 def main():
     opts = _parse_opts()
     napi = numerapi.NumerAPI()
+    log.info("Downloading data...")
     downloaded_fl_map = ut.download_data(
         version=opts.version,
         data_path=opts.data_path,
