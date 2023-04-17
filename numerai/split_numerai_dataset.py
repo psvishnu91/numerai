@@ -85,9 +85,9 @@ SPLIT_CONFIG = [
     },
     {
         "source": "combined",
-        "label": "train_p0-100_test_p0-80",
-        "min_era_percent": 80.0,
-        "max_era_percent": 100.0,
+        "label_prefix": "traintest",
+        "min_era_percent": 0.0,
+        "max_era_percent": 80.0,
     },
 ]
 
