@@ -1,0 +1,3 @@
+pandas
+numerapi
+boto3
