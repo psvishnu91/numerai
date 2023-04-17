@@ -31,6 +31,7 @@ import gc
 import logging
 import os.path
 import pandas as pd
+import tqdm
 
 import numerapi
 import nmr_utils as nu
@@ -94,7 +95,7 @@ SPLIT_CONFIG = [
 @dc.dataclass(frozen=True)
 class Datasets:
     #: Concatenated train and test data.
-    all_data_df: pd.DataFrame
+    data: pd.DataFrame
     train_eras: pd.Series
     test_eras: pd.Series
     all_eras: pd.Series
@@ -118,6 +119,7 @@ def main():
     gc.collect()
     _split_and_save_datasets(
         datasets=datasets,
+        version=opts.version,
         data_path=opts.data_path,
         split_config=SPLIT_CONFIG,
         as_int8=opts.int8,
@@ -191,10 +193,10 @@ def _load_datasets(downloaded_fl_map) -> Datasets:
     all_data = pd.concat([training_data, test_data])
     all_data[nu.ERA_COL] = all_data[nu.ERA_COL].astype(int)
     return Datasets(
-        data=all_data,
-        train_eras=train[nu.ERA_COL].unique(),
-        test_eras=test[nu.ERA_COL].unique(),
-        all_eras=all_data[nu.ERA_COL].unique(),
+        all_data_df=all_data,
+        train_eras=pd.Series(training_data[nu.ERA_COL].astype(int).unique()),
+        test_eras=pd.Series(test_data[nu.ERA_COL].astype(int).unique()),
+        all_eras=pd.Series(all_data[nu.ERA_COL].astype(int).unique()),
         # save indices for easier data selection later
         training_indices=training_data.index,
         test_indices=test_data.index,
@@ -204,6 +206,7 @@ def _load_datasets(downloaded_fl_map) -> Datasets:
 
 def _split_and_save_datasets(
     datasets: Datasets,
+    version: str,
     data_path: str,
     split_config: list[dict[str, str]],
     as_int8: bool,
@@ -220,7 +223,9 @@ def _split_and_save_datasets(
         data_path/splits_folder/train_p0-100_test_p0-80.parquet
     """
     metadata = {}
-    for split in split_config:
+    os.makedirs(os.path.join(data_path, version, splits_folder), exist_ok=True)
+    log.info(f"Creating and saving splits ...")
+    for split in tqdm.tqdm(split_config):
         split_data = _split_data(datasets=datasets, split=split)
         split_fl = _build_split_flname(split=split, as_int8=as_int8)
         split_df = split_data["split_df"]
@@ -229,10 +234,10 @@ def _split_and_save_datasets(
             "max_era": split_data["max_era"],
             "num_rows": len(split_df),
         }
-        split_df.to_parquet(os.path.join(data_path, splits_folder, split_fl))
+        split_df.to_parquet(os.path.join(data_path, version, splits_folder, split_fl))
     ut.save_json(
         obj=metadata,
-        fl=os.path.join(data_path, splits_folder, "metadata.json"),
+        fl=os.path.join(data_path, version, splits_folder, "metadata.json"),
     )
 
 
