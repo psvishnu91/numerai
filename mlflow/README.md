@@ -3,17 +3,18 @@ An mlflow serving tracker setup to monitor the numerai modelling.
 
 # Setup
 ## AWS
-1. Setup security group `mlflow-tracking-server` as below \
+1. git clone this repo `git clone https://github.com/vispz/numerai.git`.
+2. Setup security group `mlflow-tracking-server` as below \
    <img src="./sg.png" width="40%"/>
-2. Start a new `t3.nano` instance on EC2. Here I have set access from anywhere in
-   the internet. We might want to allow this within a VPC. \
-   <img src="./security.png" width="40%"/>
-2. Run `bash upload.sh <ec2 instance id>` from your local machine, replacing the
+3. Create an s3 bucket. In this repo we call it `numerai-v1`.
+4. Start a new `t3.nano` instance on EC2. Here I have set access from anywhere in
+   the internet. Set the above security group. We can use a EB2 volume of 10GB.
+5. Run `bash upload.sh <ec2 instance id>` from your local machine, replacing the
    appropriate cred file locations. Example:
    `bash upload.sh ubuntu@ec2-3-17-6-177.us-east-2.compute.amazonaws.com`.
-3. SSH into the AWS EC2 instance and run `setup_mlflow.sh`. This needs to be run once
+6. SSH into the AWS EC2 instance and run `setup_mlflow.sh`. This needs to be run once
    (can be run again).
-4. Run `run_mlflow.sh` to run the docker container running mlflow.
+7. Run `run_mlflow.sh` to run the docker container running mlflow.
 
 
 ## Building docker image
