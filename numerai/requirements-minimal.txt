@@ -1,4 +1,5 @@
 boto3
+halo
 mlflow
 numerapi
 pandas
