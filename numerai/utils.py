@@ -37,9 +37,19 @@ def save_json(obj: Union[dict, list], fl: str) -> None:
 ########################################################################################
 
 
-def upload_to_s3_recursively(dir_path: str, s3_path: str, aws_credential_fl: str):
+def upload_to_s3_recursively(
+    dir_path: str,
+    s3_path: str,
+    aws_credential_fl: str,
+    dry_run: bool = False,
+) -> None:
     """Sample usage::
-    upload_to_s3_recursively(dir_path="/path/to/dir", s3_path="s3://bucket/prefix/")
+
+    upload_to_s3_recursively(
+        dir_path="/path/to/dir",
+        s3_path="s3://bucket/prefix/",
+        aws_credential_fl="~/.aws/credentials",
+    )
     """
     # upload files in dir_path recursively to s3_path
     boto_session = build_boto_session(aws_credential_fl=aws_credential_fl)
@@ -53,8 +63,15 @@ def upload_to_s3_recursively(dir_path: str, s3_path: str, aws_credential_fl: str
                 prefix,
                 os.path.relpath(path=local_path, start=dir_path),
             )
-            log.info(f"Uploading {local_path} to s3://{bucket}/{s3_key}")
-            s3.meta.client.upload_file(Filename=local_path, Bucket=bucket, Key=s3_key)
+            if dry_run:
+                log.info(
+                    f"[DRYRUN] Would upload {local_path} to s3://{bucket}/{s3_key}"
+                )
+            else:
+                log.info(f"Uploading {local_path} to s3://{bucket}/{s3_key}")
+                s3.meta.client.upload_file(
+                    Filename=local_path, Bucket=bucket, Key=s3_key
+                )
 
 
 def build_boto_session(aws_credential_fl: str) -> boto3.Session:

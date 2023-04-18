@@ -30,13 +30,12 @@ import dataclasses as dc
 import gc
 import logging
 import os.path
+from typing import Any, Optional
+
+import nmr_utils as nu
 import pandas as pd
 import tqdm
-
-import numerapi
-import nmr_utils as nu
 import utils as ut
-
 
 logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger(__name__)
@@ -89,6 +88,12 @@ SPLIT_CONFIG = [
         "min_era_percent": 0.0,
         "max_era_percent": 80.0,
     },
+    {
+        "source": "combined",
+        "label_prefix": "traintest",
+        "min_era_percent": 80.0,
+        "max_era_percent": 100.0,
+    },
 ]
 
 
@@ -106,7 +111,6 @@ class Datasets:
 
 def main():
     opts = _parse_opts()
-    napi = numerapi.NumerAPI()
     log.info("Downloading data...")
     downloaded_fl_map = ut.download_data(
         version=opts.version,
@@ -124,14 +128,21 @@ def main():
         split_config=SPLIT_CONFIG,
         as_int8=opts.int8,
         splits_folder="splits",
+        labels=set(opts.labels),
     )
-    if not opts.s3_dry_run:
-        log.info("Uploading to s3...")
-        ut.upload_to_s3_recursively(
-            dir_path=opts.data_path,
-            s3_path=opts.s3_path,
-            aws_credential_fl=opts.aws_credentials,
-        )
+    log.info("Uploading to s3...")
+    if opts.upload_splits_only:
+        dir_path = os.path.join(opts.data_path, opts.split_folder)
+        upload_s3_path = os.path.join(opts.s3_path, opts.split_folder)
+    else:
+        dir_path = opts.data_path
+        upload_s3_path = opts.s3_path
+    ut.upload_to_s3_recursively(
+        dir_path=dir_path,
+        s3_path=upload_s3_path,
+        aws_credential_fl=opts.aws_credentials,
+        dry_run=opts.s3_dry_run,
+    )
 
 
 def _parse_opts():
@@ -164,7 +175,7 @@ def _parse_opts():
         type=str,
         help=(
             "If set, uploads the data to s3 at this path. Example: "
-            "`s3://numerai-datasets/2023/04/17/v4.1/`.",
+            "`s3://numerai-datasets/2023/04/17/v4.1/`."
         ),
         required=True,
     )
@@ -183,6 +194,26 @@ def _parse_opts():
         ),
         required=True,
     )
+    parser.add_argument(
+        "--upload-splits-only",
+        action="store_true",
+        help=(
+            "If set, will only upload the splits to s3. This is useful if you've "
+            "already uploaded the data to s3 and just want to update the splits."
+        ),
+        default=False,
+    )
+    parser.add_argument(
+        "--labels",
+        nargs="*",
+        type=str,
+        help=(
+            "If set, will only compute and upload the splits for the given labels. "
+            "Example: `--labels val_p60-80`. This is useful if you've already "
+            "computed and uploaded some splits."
+        ),
+        default=None,
+    )
     return parser.parse_args()
 
 
@@ -193,7 +224,7 @@ def _load_datasets(downloaded_fl_map) -> Datasets:
     all_data = pd.concat([training_data, test_data])
     all_data[nu.ERA_COL] = all_data[nu.ERA_COL].astype(int)
     return Datasets(
-        all_data_df=all_data,
+        all_data_df=all_data,  # type: ignore
         train_eras=pd.Series(training_data[nu.ERA_COL].astype(int).unique()),
         test_eras=pd.Series(test_data[nu.ERA_COL].astype(int).unique()),
         all_eras=pd.Series(all_data[nu.ERA_COL].astype(int).unique()),
@@ -211,6 +242,7 @@ def _split_and_save_datasets(
     split_config: list[dict[str, str]],
     as_int8: bool,
     splits_folder: str,
+    labels: Optional[set[str]] = None,
 ):
     """Split the data into train and test into various splits according to
     ``split_config`` and save to disk. See SPLIT_CONFIG definition for more details.
@@ -228,6 +260,11 @@ def _split_and_save_datasets(
     for split in tqdm.tqdm(split_config):
         split_data = _split_data(datasets=datasets, split=split)
         split_fl = _build_split_flname(split=split, as_int8=as_int8)
+        # If `labels` is given, only files that start with these labels will be computed.
+        if (labels is not None) and not any(
+            split_fl.startswith(label) for label in labels
+        ):
+            continue
         split_df = split_data["split_df"]
         metadata[split_fl] = {
             "min_era": split_data["min_era"],
@@ -247,7 +284,7 @@ def _build_split_flname(split: dict[str, str], as_int8: bool) -> str:
     except KeyError:
         split_label = (
             f"{split['label_prefix']}"
-            f"_p{split['min_era_percent']}-{split['max_era_percent']}"
+            f"_p{int(split['min_era_percent'])}-{int(split['max_era_percent'])}"
         )
     if as_int8:
         split_file_name = f"{split_label}_int8.parquet"
@@ -256,7 +293,7 @@ def _build_split_flname(split: dict[str, str], as_int8: bool) -> str:
     return split_file_name
 
 
-def _split_data(datasets: Datasets, split: dict[str, str]) -> pd.DataFrame:
+def _split_data(datasets: Datasets, split: dict[str, Any]) -> dict:
     """Split the data according to the split config."""
     if split["source"] == "train":
         split_df = datasets.data.loc[datasets.training_indices]

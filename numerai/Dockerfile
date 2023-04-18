@@ -3,7 +3,8 @@
 #  && docker push vishnups/numerai-visp
 FROM python:3.10.0
 RUN mkdir /numerai/
+COPY requirements-minimal.txt /numerai/
+RUN pip install -r /numerai/requirements-minimal.txt
 COPY . /numerai/
 WORKDIR /numerai/
-RUN pip install -r requirements-minimal.txt
 CMD bash
