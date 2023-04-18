@@ -21,12 +21,21 @@ Usage::
     python split_numerai_dataset.py \
         --version v4.1 \
         --data-path data/ \
-        --s3-path s3://numerai-v1/dataset/ \
-        --aws-credentials ~/.aws/personal_credentials \
-        --s3-dry-run
+        --s3-path s3://numerai/dataset/ \
+        --aws-credentials ~/.aws/credentials
+    
+    # If you are rerunning the script for a new split
+    python split_numerai_dataset.py \
+        --version v4.1 \
+        --data-path data/ \
+        --s3-path s3://numerai/dataset/ \
+        --aws-credentials ~/.aws/credentials \
+        --upload-splits-only \
+        --labels traintest_p80-100 
 """
 import argparse
 import dataclasses as dc
+import datetime
 import gc
 import logging
 import os.path
@@ -37,9 +46,10 @@ import pandas as pd
 import tqdm
 import utils as ut
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
+SPLITS_FOLDER = "splits"
 #: A mapping of which data splits we would like to generate. Source can be either
 #: "train", "test" or "combined". The final label will be
 #: `{label_prefix}_p{min_era_percent}-{max_era_percent}.parquet`. If ``label`` is
@@ -104,9 +114,9 @@ class Datasets:
     train_eras: pd.Series
     test_eras: pd.Series
     all_eras: pd.Series
-    training_indices: pd.Series
-    test_indices: pd.Series
-    all_indices: pd.Series
+    training_indices: pd.Index
+    test_indices: pd.Index
+    all_indices: pd.Index
 
 
 def main():
@@ -127,13 +137,13 @@ def main():
         data_path=opts.data_path,
         split_config=SPLIT_CONFIG,
         as_int8=opts.int8,
-        splits_folder="splits",
+        splits_folder=SPLITS_FOLDER,
         labels=set(opts.labels),
     )
     log.info("Uploading to s3...")
     if opts.upload_splits_only:
-        dir_path = os.path.join(opts.data_path, opts.split_folder)
-        upload_s3_path = os.path.join(opts.s3_path, opts.split_folder)
+        dir_path = os.path.join(opts.data_path, opts.version, SPLITS_FOLDER)
+        upload_s3_path = os.path.join(opts.s3_path, opts.version, SPLITS_FOLDER)
     else:
         dir_path = opts.data_path
         upload_s3_path = opts.s3_path
@@ -141,6 +151,7 @@ def main():
         dir_path=dir_path,
         s3_path=upload_s3_path,
         aws_credential_fl=opts.aws_credentials,
+        aws_profile=opts.aws_profile,
         dry_run=opts.s3_dry_run,
     )
 
@@ -195,6 +206,15 @@ def _parse_opts():
         required=True,
     )
     parser.add_argument(
+        "--aws-profile",
+        type=str,
+        help=(
+            "If set, will use this profile in the aws credentials file. If not set, "
+            "will use the default profile."
+        ),
+        default="default",
+    )
+    parser.add_argument(
         "--upload-splits-only",
         action="store_true",
         help=(
@@ -224,7 +244,7 @@ def _load_datasets(downloaded_fl_map) -> Datasets:
     all_data = pd.concat([training_data, test_data])
     all_data[nu.ERA_COL] = all_data[nu.ERA_COL].astype(int)
     return Datasets(
-        all_data_df=all_data,  # type: ignore
+        data=all_data,
         train_eras=pd.Series(training_data[nu.ERA_COL].astype(int).unique()),
         test_eras=pd.Series(test_data[nu.ERA_COL].astype(int).unique()),
         all_eras=pd.Series(all_data[nu.ERA_COL].astype(int).unique()),
@@ -258,13 +278,13 @@ def _split_and_save_datasets(
     os.makedirs(os.path.join(data_path, version, splits_folder), exist_ok=True)
     log.info(f"Creating and saving splits ...")
     for split in tqdm.tqdm(split_config):
-        split_data = _split_data(datasets=datasets, split=split)
         split_fl = _build_split_flname(split=split, as_int8=as_int8)
         # If `labels` is given, only files that start with these labels will be computed.
         if (labels is not None) and not any(
             split_fl.startswith(label) for label in labels
         ):
             continue
+        split_data = _split_data(datasets=datasets, split=split)
         split_df = split_data["split_df"]
         metadata[split_fl] = {
             "min_era": split_data["min_era"],
@@ -272,9 +292,10 @@ def _split_and_save_datasets(
             "num_rows": len(split_df),
         }
         split_df.to_parquet(os.path.join(data_path, version, splits_folder, split_fl))
+    ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     ut.save_json(
         obj=metadata,
-        fl=os.path.join(data_path, version, splits_folder, "metadata.json"),
+        fl=os.path.join(data_path, version, splits_folder, f"metadata_{ts}.json"),
     )
 
 

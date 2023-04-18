@@ -41,6 +41,7 @@ def upload_to_s3_recursively(
     dir_path: str,
     s3_path: str,
     aws_credential_fl: str,
+    aws_profile: str = "default",
     dry_run: bool = False,
 ) -> None:
     """Sample usage::
@@ -52,7 +53,9 @@ def upload_to_s3_recursively(
     )
     """
     # upload files in dir_path recursively to s3_path
-    boto_session = build_boto_session(aws_credential_fl=aws_credential_fl)
+    boto_session = build_boto_session(
+        aws_credential_fl=aws_credential_fl, aws_profile=aws_profile
+    )
     s3 = boto_session.resource("s3")
     bucket = urllib.parse.urlparse(s3_path).netloc
     prefix = urllib.parse.urlparse(s3_path).path.lstrip("/")
@@ -74,8 +77,10 @@ def upload_to_s3_recursively(
                 )
 
 
-def build_boto_session(aws_credential_fl: str) -> boto3.Session:
-    cfg = read_aws_config(aws_credential_fl=aws_credential_fl)
+def build_boto_session(
+    aws_credential_fl: str, aws_profile: str = "default"
+) -> boto3.Session:
+    cfg = read_aws_config(aws_credential_fl=aws_credential_fl, profile=aws_profile)
     return boto3.Session(
         aws_access_key_id=cfg["aws_access_key_id"],
         aws_secret_access_key=cfg["aws_secret_access_key"],
