@@ -1,5 +1,10 @@
 boto3
+flatdict
 halo
 mlflow
+lightbm
 numerapi
 pandas
+plotly
+seaborn
+tqdm

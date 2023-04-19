@@ -117,7 +117,13 @@ def get_time_series_cross_val_splits(data, cv=3, embargo=12):
 
 
 def neutralize(
-    df, columns, neutralizers=None, proportion=1.0, normalize=True, era_col="era", verbose=False
+    df,
+    columns,
+    neutralizers=None,
+    proportion=1.0,
+    normalize=True,
+    era_col="era",
+    verbose=False,
 ):
     if neutralizers is None:
         neutralizers = []
@@ -129,20 +135,18 @@ def neutralize(
         iterator = unique_eras
     for u in iterator:
         df_era = df[df[era_col] == u]
-        scores = df_era[columns].values
+        scores = df_era[columns].values.astype(np.float32)
         if normalize:
             scores2 = []
             for x in scores.T:
                 x = (scipy.stats.rankdata(x, method="ordinal") - 0.5) / len(x)
                 x = scipy.stats.norm.ppf(x)
                 scores2.append(x)
-            scores = np.array(scores2).T
-        exposures = df_era[neutralizers].values
+            scores = np.array(scores2).T.astype(np.float32)
+        exposures = df_era[neutralizers].values.astype(np.float32)
 
         scores -= proportion * exposures.dot(
-            np.linalg.pinv(exposures.astype(np.float32), rcond=1e-6).dot(
-                scores.astype(np.float32)
-            )
+            np.linalg.pinv(exposures, rcond=1e-6).dot(scores)
         )
 
         scores /= scores.std(ddof=0)
@@ -247,6 +251,7 @@ def validation_metrics(
     fast_mode=False,
     target_col=TARGET_COL,
     features_for_neutralization=None,
+    include_mmc=True,
 ):
     validation_stats = pd.DataFrame()
     feature_cols = [c for c in validation_data if c.startswith("feature_")]
@@ -326,38 +331,41 @@ def validation_metrics(
             validation_stats.loc["tb200_std", pred_col] = tb200_std
             validation_stats.loc["tb200_sharpe", pred_col] = tb200_sharpe
 
-        # MMC over validation
-        mmc_scores = []
-        corr_scores = []
-        for _, x in validation_data.groupby(ERA_COL):
-            series = neutralize_series(unif(x[pred_col]), (x[example_col]))
-            mmc_scores.append(np.cov(series, x[target_col])[0, 1] / (0.29**2))
-            corr_scores.append(unif(x[pred_col]).corr(x[target_col]))
+        if include_mmc:
+            # MMC over validation
+            mmc_scores = []
+            corr_scores = []
+            for _, x in validation_data.groupby(ERA_COL):
+                series = neutralize_series(unif(x[pred_col]), (x[example_col]))
+                mmc_scores.append(np.cov(series, x[target_col])[0, 1] / (0.29**2))
+                corr_scores.append(unif(x[pred_col]).corr(x[target_col]))
 
-        val_mmc_mean = np.mean(mmc_scores)
-        val_mmc_std = np.std(mmc_scores)
-        corr_plus_mmcs = [c + m for c, m in zip(corr_scores, mmc_scores)]
-        corr_plus_mmc_sharpe = np.mean(corr_plus_mmcs) / np.std(corr_plus_mmcs)
+            val_mmc_mean = np.mean(mmc_scores)
+            val_mmc_std = np.std(mmc_scores)
+            corr_plus_mmcs = [c + m for c, m in zip(corr_scores, mmc_scores)]
+            corr_plus_mmc_sharpe = np.mean(corr_plus_mmcs) / np.std(corr_plus_mmcs)
 
-        validation_stats.loc["mmc_mean", pred_col] = val_mmc_mean
-        validation_stats.loc["corr_plus_mmc_sharpe", pred_col] = corr_plus_mmc_sharpe
+            validation_stats.loc["mmc_mean", pred_col] = val_mmc_mean
+            validation_stats.loc[
+                "corr_plus_mmc_sharpe", pred_col
+            ] = corr_plus_mmc_sharpe
 
-        # Check correlation with example predictions
-        per_era_corrs = validation_data.groupby(ERA_COL).apply(
-            lambda d: unif(d[pred_col]).corr(unif(d[example_col]))
-        )
-        corr_with_example_preds = per_era_corrs.mean()
-        validation_stats.loc[
-            "corr_with_example_preds", pred_col
-        ] = corr_with_example_preds
-
-        # Check exposure dissimilarity per era
-        tdf = validation_data.groupby(ERA_COL).apply(
-            lambda df: exposure_dissimilarity_per_era(
-                df, pred_col, example_col, feature_cols
+            # Check correlation with example predictions
+            per_era_corrs = validation_data.groupby(ERA_COL).apply(
+                lambda d: unif(d[pred_col]).corr(unif(d[example_col]))
             )
-        )
-        validation_stats.loc["exposure_dissimilarity_mean", pred_col] = tdf.mean()
+            corr_with_example_preds = per_era_corrs.mean()
+            validation_stats.loc[
+                "corr_with_example_preds", pred_col
+            ] = corr_with_example_preds
+
+            # Check exposure dissimilarity per era
+            tdf = validation_data.groupby(ERA_COL).apply(
+                lambda df: exposure_dissimilarity_per_era(
+                    df, pred_col, example_col, feature_cols
+                )
+            )
+            validation_stats.loc["exposure_dissimilarity_mean", pred_col] = tdf.mean()
 
     # .transpose so that stats are columns and the model_name is the row
     return validation_stats.transpose()
