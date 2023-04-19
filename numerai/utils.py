@@ -1,4 +1,5 @@
 import functools
+import hashlib
 import json
 import os
 import os.path
@@ -16,6 +17,14 @@ import urllib
 DF = pd.DataFrame
 
 log = logging.getLogger(__name__)
+
+
+########################################################################################
+# MISC UTILS
+########################################################################################
+def hash_dict(d: dict) -> str:
+    return hashlib.md5(json.dumps(d, sort_keys=True).encode("utf-8")).hexdigest()[:6]
+
 
 ########################################################################################
 # FILE UTILS
@@ -35,6 +44,41 @@ def save_json(obj: Union[dict, list], fl: str) -> None:
 ########################################################################################
 # AWS UTILS
 ########################################################################################
+def download_s3_file(
+    s3_path: str,
+    local_path: str,
+    aws_credential_fl: str,
+    aws_profile: str = "default",
+    overwrite: bool = False,
+    dry_run: bool = False,
+) -> None:
+    """Sample usage::
+
+    download_s3_file(
+        s3_path="s3://bucket/prefix/file",
+        local_path="/path/to/file",
+        aws_credential_fl="~/.aws/credentials",
+    )
+    """
+    # download s3_path to local_path
+    boto_session = build_boto_session(
+        aws_credential_fl=aws_credential_fl, aws_profile=aws_profile
+    )
+    s3 = boto_session.resource("s3")
+    bucket = urllib.parse.urlparse(s3_path).netloc
+    s3_key = urllib.parse.urlparse(s3_path).path.lstrip("/")
+    s3_fl = f"s3://{bucket}/{s3_key}"
+    local_fl = os.path.join(local_path, os.path.basename(s3_key))
+    if dry_run:
+        log.info(f"[DRYRUN] Would download {s3_fl} to {local_fl}")
+    elif os.path.exists(local_fl) and not overwrite:
+        log.info(
+            f"Would have downloaded {s3_fl} to {local_fl}. "
+            f"But {local_fl} exists. Will not download again ..."
+        )
+    else:
+        log.info(f"Downloading {s3_fl} to {local_fl}")
+        s3.meta.client.download_file(Bucket=bucket, Key=s3_key, Filename=local_fl)
 
 
 def upload_to_s3_recursively(
@@ -105,6 +149,24 @@ def read_aws_config(
 
 
 ########################################################################################
+# FEATURISATION
+########################################################################################
+
+
+def fmt_features(df: DF, features: list[str], int8: bool, impute: bool) -> DF:
+    if impute:
+        df.loc[:, features] = df.loc[:, features].fillna(
+            df[features].median(skipna=True)
+        )
+    df.loc[:, features] = df.loc[:, features].astype(np.int8 if int8 else np.float32)
+    return df
+
+
+def cast_features(df: DF, int8: bool) -> DF:
+    return df.astype(np.int8 if int8 else np.float32)
+
+
+########################################################################################
 # DATA LOADING
 ########################################################################################
 
@@ -150,7 +212,7 @@ def download_data(
         downloaded_fl_map[fl_key] = dst
     if include_live:
         downloaded_fl_map["live"] = _download_live_dataset(
-            version=version, dtype_suf=dtype_suf
+            data_path=data_path, version=version, dtype_suf=dtype_suf
         )
     return downloaded_fl_map
 
@@ -160,6 +222,7 @@ def _download_live_dataset(version: str, data_path: str, dtype_suf: str) -> str:
     :param dtype_suf: "_int8" or "".
     """
     # Tournament data changes every week so we specify the round in their name.
+    napi = numerapi.NumerAPI()
     current_round = napi.get_current_round()
     print(f"Current round: {current_round}")
     live_src = f"{version}/live{dtype_suf}.parquet"
@@ -177,10 +240,10 @@ def build_cols_to_read(
     # read the feature metadata and get a feature set (or all the features)
     with open(feature_json_fl, "r") as f:
         feature_metadata = json.load(f)
-    # features = feature_metadata["feature_sets"]["small"] # get the small feature set
-    features = feature_metadata["feature_sets"][
-        feature_set_name
-    ]  # get the medium feature set
+    if feature_set_name:
+        features = feature_metadata["feature_sets"][feature_set_name]
+    else:
+        features = list(feature_metadata["feature_states"])
     target_cols = feature_metadata["targets"]
     # read in just those features along with era and target columns
     return features + target_cols + [nmr_utils.ERA_COL, nmr_utils.DATA_TYPE_COL]
@@ -218,12 +281,12 @@ def load_downloaded_data(
         return {"live": live_data}
     # We want to load and split the training data
     print("Reading training data ...")
-    train_full_data = _subsample_every_nth_era(
+    train_full_data = subsample_every_nth_era(
         df=read_parquet(downloaded_fl_map["train"]),
         n=sample_every_nth_era,
     )
     print("Reading test data ...")
-    test_data = _subsample_every_nth_era(
+    test_data = subsample_every_nth_era(
         df=read_parquet(downloaded_fl_map["test"]),
         n=sample_every_nth_era,
     )
@@ -231,7 +294,7 @@ def load_downloaded_data(
     return {**splits, "test": test_data, "live": live_data}
 
 
-def _subsample_every_nth_era(df: DF, n: int = 4) -> DF:
+def subsample_every_nth_era(df: DF, n: int = 4) -> DF:
     if n == 1:
         return df
     every_nth_era = set(df[nmr_utils.ERA_COL].unique()[::n])  # type: ignore

@@ -104,6 +104,12 @@ SPLIT_CONFIG = [
         "min_era_percent": 80.0,
         "max_era_percent": 100.0,
     },
+    {
+        "source": "combined",
+        "label_prefix": "traintest",
+        "min_era_percent": 0.0,
+        "max_era_percent": 100.0,
+    },
 ]
 
 
@@ -138,7 +144,7 @@ def main():
         split_config=SPLIT_CONFIG,
         as_int8=opts.int8,
         splits_folder=SPLITS_FOLDER,
-        labels=set(opts.labels),
+        labels=opts.labels,
     )
     log.info("Uploading to s3...")
     if opts.upload_splits_only:
