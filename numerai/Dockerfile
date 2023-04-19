@@ -2,7 +2,6 @@
 # docker build  --platform linux/amd64 -t vishnups/numerai-visp .
 #  && docker push vishnups/numerai-visp
 FROM python:3.10.0
-RUN mkdir /numerai/
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -13,9 +12,10 @@ RUN apt-get update && \
         curl \
         git \
         libomp-dev \
-        vim
-COPY requirements-minimal.txt /numerai/
-RUN pip install -r /numerai/requirements-minimal.txt
-COPY . /numerai/
+        vim \
+        git
+COPY requirements-minimal.txt /
+RUN pip install -r /requirements-minimal.txt
+RUN cd / && git clone https://github.com/vispz/numerai.git
 WORKDIR /numerai/
 CMD bash

@@ -4,6 +4,7 @@ set -e
 # Set port and aws profile
 PORT=5500 AWS_PROFILE="mlflow"  \
 && sudo docker run --interactive -t \
+    -v ~/mlruns:/mlflow/mlruns/ \
     --publish "${PORT}":"${PORT}" \
     --env FILE_DIR="/mlflow" \
     --env PORT="${PORT}" \

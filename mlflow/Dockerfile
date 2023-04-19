@@ -6,7 +6,9 @@ RUN pip install \
     mlflow==2.0.1 \
     pymysql==1.0.2 \
     boto3 && \
-    mkdir /mlflow/
+    mkdir -p /mlflow/mlruns/
+
+WORKDIR /mlflow/
 
 CMD mlflow server \
    --host 0.0.0.0 \

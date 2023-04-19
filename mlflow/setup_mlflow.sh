@@ -14,7 +14,7 @@ sudo apt-get install -y awscli docker-ce docker-ce-cli containerd.io docker-buil
 sudo systemctl start docker
 
 # Move credentials uploaded locally
-mkdir ~/.aws/
+mkdir ~/.aws/ ~/mlruns/
 cp credentials ~/.aws/credentials
 
 # Download docker image for mlflow
