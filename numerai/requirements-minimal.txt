@@ -2,7 +2,7 @@ boto3
 flatdict
 halo
 mlflow
-lightbm
+lightgbm
 numerapi
 pandas
 plotly

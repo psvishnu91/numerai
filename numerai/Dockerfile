@@ -3,9 +3,19 @@
 #  && docker push vishnups/numerai-visp
 FROM python:3.10.0
 RUN mkdir /numerai/
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        cmake \
+        build-essential \
+        gcc \
+        g++ \
+        curl \
+        git \
+        libomp-dev \
+        vim
 COPY requirements-minimal.txt /numerai/
 RUN pip install -r /numerai/requirements-minimal.txt
-RUN apt-get update && apt-get install -y vim
 COPY . /numerai/
 WORKDIR /numerai/
 CMD bash
