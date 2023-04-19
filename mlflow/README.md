@@ -23,8 +23,7 @@ Even better if you can build it inside an ec2 instance and upload but I had issu
 If you have to do it in a mac.
 
 ``` shell
-docker buildx create --use
-docker buildx build --platform linux/amd64,linux/arm64 -t vishnups/mlflow-visp .
+docker build --platform linux/amd64 -t vishnups/mlflow-visp .
 docker push vishnups/mlflow-visp
 ```
 
@@ -55,3 +54,35 @@ with mlflow.start_run(run_name="expt_2"):
 To prevent having to rerun this script many times, I baked this. See
 [AWS docs](https://docs.aws.amazon.com/toolkit-for-visual-studio/latest/user-guide/tkv-create-ami-from-instance.html)
 for details.
+
+## Connecting to an RDS backend
+Steps in setting up RDS cluster
+
+
+1. Create postgres cluster in aws RDS (you can use the default setup). Remember
+   your master password.
+2. In AWS Console, select Actions -> setup EC2 connection
+([link](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/ec2-rds-connect.html))
+and connect the mlflow EC2 instance to this RDS. From documentation:
+   ```
+   To set up a connection between the database and the EC2 instance, VPC security group
+   rds-ec2-1 is added to the database, and VPC security group ec2-rds-1 is added to the
+   EC2 instance.
+   ```
+3. In the EC2 machine
+``` bash
+ubuntu@ip-172-31-0-158:~$ psql --host=mlflow.cwtakrybmksl.us-east-2.rds.amazonaws.com --port=5432 --username=postgres --password
+Password:
+```
+``` sql
+postgres=> CREATE DATABASE mlflow;
+CREATE DATABASE
+postgres=> \l
+                                  List of databases
+   Name    |  Owner   | Encoding |   Collate   |    Ctype    |   Access privileges
+-----------+----------+----------+-------------+-------------+-----------------------
+ mlflow    | postgres | UTF8     | en_US.UTF-8 | en_US.UTF-8 |
+ postgres  | postgres | UTF8     | en_US.UTF-8 | en_US.UTF-8 |
+...
+(5 rows)
+```
