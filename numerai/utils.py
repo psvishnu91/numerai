@@ -1,18 +1,20 @@
-import functools
+import configparser
+import gc
 import hashlib
 import json
+import logging
 import os
 import os.path
-from typing import Optional, Union
+import urllib
 
-import configparser
+import mlflow
+import lightgbm as lgb
+from typing import Callable, Optional, Union
+
 import boto3
-import logging
-import nmr_utils
-import numerapi
 import numpy as np
 import pandas as pd
-import urllib
+import nmr_utils
 
 DF = pd.DataFrame
 
@@ -79,6 +81,10 @@ def download_s3_file(
     else:
         log.info(f"Downloading {s3_fl} to {local_fl}")
         s3.meta.client.download_file(Bucket=bucket, Key=s3_key, Filename=local_fl)
+
+
+def log_something():
+    log.info("Hello World")
 
 
 def upload_to_s3_recursively(
@@ -171,65 +177,50 @@ def cast_features(df: DF, int8: bool) -> DF:
 ########################################################################################
 
 
-def download_data(
-    version: str, data_path: str, as_int8: bool, include_live: bool = True
-) -> dict[str, str]:
-    """Downloads training data.
-
-    :version: Version of the data (ex: `'v4.1'`).
-    :param data_path: where data is to be saved.
-    :param as_int8: If set to true, we will download files in int8 format.
-         if you remove the int8 suffix for each of these files, you'll
-         get features between 0 and 1 as floats. int_8 files are much smaller...
-         but are harder to work with because some packages don't like ints and
-         the way NAs are encoded.
-    Sample output::
-
-        {
-            "train": "/path/to/train.parquet",
-            "test": "/path/to/validation.parquet",
-            "features_json": "/path/to/features.json",
-            "val_example": "/path/to/validation_example_preds.parquet",
-            "live": "/path/to/live.parquet",
-        }
-    """
-    # A mapping from to an easy name to the downloaded fl path
-    downloaded_fl_map = {}
-    napi = numerapi.NumerAPI()
-    os.makedirs(data_path, exist_ok=True)
-    print("Downloading dataset files...")
-    dtype_suf = "_int8" if as_int8 else ""
-    for fl_key, fl in [
-        ("train", f"train{dtype_suf}.parquet"),
-        ("test", f"validation{dtype_suf}.parquet"),
-        ("features_json", "features.json"),
-        ("val_example", "validation_example_preds.parquet"),
-    ]:
-        src = os.path.join(version, fl)
-        dst = os.path.join(data_path, src)
-        print(f"Downloading {src} to {dst}...")
-        napi.download_dataset(filename=src, dest_path=dst)
-        downloaded_fl_map[fl_key] = dst
-    if include_live:
-        downloaded_fl_map["live"] = _download_live_dataset(
-            data_path=data_path, version=version, dtype_suf=dtype_suf
+def download_fls(
+    data_path,
+    s3_path,
+    s3_files,
+    aws_credential_fl,
+    int8=False,
+):
+    for s3_fl in s3_files:
+        if s3_fl.endswith("json") or s3_fl.endswith("parquet"):
+            s3_flnm = s3_fl
+        else:
+            int8_pfx = "_int8" if int8 else ""
+            s3_flnm = f"{s3_fl}{int8_pfx}.parquet"
+        log.info(f"Downloading: {s3_flnm}")
+        download_s3_file(
+            s3_path=os.path.join(s3_path, s3_flnm),
+            local_path=data_path,
+            aws_credential_fl=aws_credential_fl,
         )
-    return downloaded_fl_map
 
 
-def _download_live_dataset(version: str, data_path: str, dtype_suf: str) -> str:
-    """Downloads the live dataset for the current round.
-    :param dtype_suf: "_int8" or "".
-    """
-    # Tournament data changes every week so we specify the round in their name.
-    napi = numerapi.NumerAPI()
-    current_round = napi.get_current_round()
-    print(f"Current round: {current_round}")
-    live_src = f"{version}/live{dtype_suf}.parquet"
-    live_dst = os.path.join(data_path, f"{current_round}/live{dtype_suf}.parquet")
-    print(f"Downloading {live_src} to {live_dst}...")
-    napi.download_dataset(filename=live_src, dest_path=live_dst)
-    return live_dst
+def get_df_loader(
+    data_path: str,
+    features: list[str],
+    read_cols: list[str],
+    sample_every_nth: int,
+    impute: bool,
+    int8: bool,
+) -> Callable[[str], DF]:
+    def load_df(fl_name: str) -> DF:
+        full_df = pd.read_parquet(
+            os.path.join(data_path, fl_name),
+            columns=read_cols,
+        )
+        df = fmt_features(
+            df=subsample_every_nth_era(df=full_df, n=sample_every_nth),
+            features=features,
+            int8=int8,
+            impute=impute,
+        )
+        gc.collect()
+        return df
+
+    return load_df
 
 
 def build_cols_to_read(
@@ -249,51 +240,6 @@ def build_cols_to_read(
     return features + target_cols + [nmr_utils.ERA_COL, nmr_utils.DATA_TYPE_COL]
 
 
-def load_downloaded_data(
-    downloaded_fl_map: dict[str, str],
-    cols_to_read: list[str],
-    val_fracs: list[float],
-    to_train: bool = True,
-    sample_every_nth_era: int = 1,
-) -> dict[str, DF]:
-    """
-    :param downloaded_fl_map: as returned by :func:`download_data`.
-    :param cols_to_read: as returned by :func:`build_cols_to_read`
-    :param to_train: if set to false, we only load live data for prediction.
-    :param sample_every_nth_era: if set to a number > 1, we subsample every nth era
-        both in train and test. We don't sample live data.
-
-    Sample input::
-
-        to_train, val_fracs = True, [0.2, 0.2]
-
-    Sample output::
-        # First 60% of training eras will be in `train`
-        # A random mix of the remaining 40% will be in val1 and val2
-        # `test` is the validation dataset provided by numerai.
-        {"train": DF, "val1": DF, "val2": DF, "test": DF, "live": DF}
-    """
-    print("Reading live data ...")
-    read_parquet = functools.partial(pd.read_parquet, columns=cols_to_read)
-    live_data = read_parquet(downloaded_fl_map["live"])
-    if not to_train:
-        print("Not loading training data")
-        return {"live": live_data}
-    # We want to load and split the training data
-    print("Reading training data ...")
-    train_full_data = subsample_every_nth_era(
-        df=read_parquet(downloaded_fl_map["train"]),
-        n=sample_every_nth_era,
-    )
-    print("Reading test data ...")
-    test_data = subsample_every_nth_era(
-        df=read_parquet(downloaded_fl_map["test"]),
-        n=sample_every_nth_era,
-    )
-    splits = _split_train_data(train_full_df=train_full_data, val_fracs=val_fracs)
-    return {**splits, "test": test_data, "live": live_data}
-
-
 def subsample_every_nth_era(df: DF, n: int = 4) -> DF:
     if n == 1:
         return df
@@ -301,35 +247,95 @@ def subsample_every_nth_era(df: DF, n: int = 4) -> DF:
     return df[df[nmr_utils.ERA_COL].isin(every_nth_era)]  # type: ignore
 
 
-def _split_train_data(train_full_df: DF, val_fracs: list[float]) -> dict[str, DF]:
-    """We want to split the training data such that the first n eras are used as training
-    and for validation, we randomly sample eras into each validation bin.
+########################################################################################
+# MODEL TRAINING
+########################################################################################
 
-    Sample input:: val_fracs = [0.2, 0.2]
-    Sample output:: {"train": DF, "val1": DF, "val2": DF}
+
+def train_model(
+    train_df: pd.DataFrame,
+    model_rootdir: str,
+    features: list[str],
+    target: str,
+    train_data_ident: str,
+    params: dict,
+    model_name: Optional[str] = None,
+    overwrite=False,
+):
+    """Trains a model and saves it to disk.
+
+    This function will check if a model with the same name already exists in the
+    model_rootdir. If it does, it will not retrain the model. If it does not, it will
+    train a new model and save it to disk.
     """
-    print("Splitting into train and validations")
-    eras = train_full_df[nmr_utils.ERA_COL].astype(int)
-    num_eras = int(eras.max())
-    # Get the first eras as training eras
-    train_max_era = int((1.0 - sum(val_fracs)) * num_eras)
-    # For the validation eras, randomly bucket them into each validation bin
-    val_eras = list(range(train_max_era + 1, num_eras + 1))
-    np.random.shuffle(val_eras)
-    val_fracs = np.array(val_fracs)  # type: ignore
-    val_era_bins = np.split(
-        val_eras,
-        # We divide the val_fracs by the sum, to make it sum to one
-        # (we are only looking at val_eras now). And then we convert it into index
-        # bins by multiplying by the num of val_eras and then covnerting to int.
-        # np.split, will produce n+1 splits where n is the number of indices passed
-        # if we include the last element, then we will create an extra empty validation df.
-        indices_or_sections=(
-            (val_fracs / np.sum(val_fracs)).cumsum() * len(val_eras)
-        ).astype(int)[:-1],
+    model_name = model_name or build_model_name(
+        train_data_ident=train_data_ident,
+        target=target,
+        params=params,
     )
-    splits = {"train": train_full_df[eras <= train_max_era]}
-    for val_num, val_era_bin in enumerate(val_era_bins, start=1):
-        split_nm = "val" if len(val_fracs) == 1 else f"val{val_num}"
-        splits[split_nm] = train_full_df[eras.isin(set(val_era_bin))]
-    return splits
+    model_folder = os.path.join(model_rootdir, train_data_ident)
+    if not overwrite:
+        log.info(f"Checking for existing model '{model_name}'")
+        train_model = nmr_utils.load_model(
+            name=model_name,
+            model_folder=model_folder,
+        )
+        if train_model:
+            log.info(f"{model_name} found, will not retrain.")
+            return train_model
+    log.info(f"Creating new model...")
+    train_model = lgb.LGBMRegressor(**params["lgbm_params"])
+    # skip rows where target is NA
+    non_na_index = train_df[target].dropna().index
+    train_model.fit(
+        X=cast_features(
+            df=train_df.loc[non_na_index, features],
+            int8=params["int8"],
+        ),
+        y=train_df.loc[non_na_index, target],
+    )
+    log.info(f"saving new model: {model_name}")
+    nmr_utils.save_model(
+        model=train_model,
+        name=model_name,
+        model_folder=model_folder,
+    )
+    return train_model
+
+
+def build_model_name(train_data_ident, target, params, suffix="") -> str:
+    """Creates a unique name for a model based on training
+    data, target col and settings"""
+    return f"{train_data_ident}_{target}{suffix}_{hash_dict(params)}"
+
+
+def predict(pred_df, model, parameters):
+    return model.predict(X=cast_features(df=pred_df, int8=parameters["int8"]))
+
+
+def get_pred_col(target):
+    return f"pred_trained_on_{target}"
+
+
+def log_mflow(
+    expt_id: str,
+    run_nm: str,
+    target: Optional[str] = None,
+    params: Optional[dict] = None,
+    train_ident: Optional[str] = None,
+    metrics_dict: Optional[dict] = None,
+    model: Optional[object] = None,
+    model_nm: Optional[str] = None,
+):
+    params = params or {}
+    with mlflow.start_run(run_name=run_nm, experiment_id=expt_id) as run:
+        mlflow.log_params(
+            params={"train_ident": train_ident, "target": target, **params}
+        )
+        if metrics_dict:
+            mlflow.log_metrics(metrics_dict)
+        if model:
+            mlflow.lightgbm.log_model(model, artifact_path=model_nm)
+            model_uri = f"runs:/{run.info.run_id}/sklearn-model"
+            mv = mlflow.register_model(model_uri=model_uri, name=model_nm)
+            log.info(f"Logged model={mv.name}, version={mv.version}")
