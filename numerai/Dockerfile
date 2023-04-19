@@ -14,9 +14,13 @@ RUN apt-get update && \
         libomp-dev \
         vim \
         git \
-        postgresql-client
+        postgresql-client \
+        tmux
 COPY requirements-minimal.txt /
 RUN pip install -r /requirements-minimal.txt
 RUN cd / && git clone https://github.com/vispz/numerai.git
+# Allow outside access to the notebook server
+RUN jupyter notebook --generate-config \
+    && echo "c.NotebookApp.ip = '*'" >> /root/.jupyter/jupyter_notebook_config.py
 WORKDIR /numerai/
 CMD bash

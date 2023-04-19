@@ -1,4 +1,5 @@
 import configparser
+import functools
 import gc
 import hashlib
 import json
@@ -8,6 +9,7 @@ import os.path
 import urllib
 
 import mlflow
+import mlflow.entities
 import lightgbm as lgb
 from typing import Callable, Optional, Union
 
@@ -18,7 +20,21 @@ import nmr_utils
 
 DF = pd.DataFrame
 
-log = logging.getLogger(__name__)
+
+def print_and_write(msg, root_dir=""):
+    with open(os.path.join(root_dir, "log.txt"), "a") as f:
+        f.write(msg + "\n")
+    print(msg)
+
+
+# HACK: For some reason logging is not working in the notebook.
+# log = logging.getLogger(__name__)
+class Logger:
+    def __init__(self, root_dir=""):
+        self.info = self.debug = functools.partial(print_and_write, root_dir=root_dir)
+
+
+log = Logger()
 
 
 ########################################################################################
@@ -234,7 +250,7 @@ def build_cols_to_read(
     if feature_set_name:
         features = feature_metadata["feature_sets"][feature_set_name]
     else:
-        features = list(feature_metadata["feature_states"])
+        features = list(feature_metadata["feature_stats"])
     target_cols = feature_metadata["targets"]
     # read in just those features along with era and target columns
     return features + target_cols + [nmr_utils.ERA_COL, nmr_utils.DATA_TYPE_COL]
@@ -318,8 +334,7 @@ def get_pred_col(target):
 
 
 def log_mflow(
-    expt_id: str,
-    run_nm: str,
+    run: mlflow.entities.Run,
     target: Optional[str] = None,
     params: Optional[dict] = None,
     train_ident: Optional[str] = None,
@@ -328,14 +343,11 @@ def log_mflow(
     model_nm: Optional[str] = None,
 ):
     params = params or {}
-    with mlflow.start_run(run_name=run_nm, experiment_id=expt_id) as run:
-        mlflow.log_params(
-            params={"train_ident": train_ident, "target": target, **params}
-        )
-        if metrics_dict:
-            mlflow.log_metrics(metrics_dict)
-        if model:
-            mlflow.lightgbm.log_model(model, artifact_path=model_nm)
-            model_uri = f"runs:/{run.info.run_id}/sklearn-model"
-            mv = mlflow.register_model(model_uri=model_uri, name=model_nm)
-            log.info(f"Logged model={mv.name}, version={mv.version}")
+    mlflow.log_params(params={"train_ident": train_ident, "target": target, **params})
+    if metrics_dict:
+        mlflow.log_metrics(metrics_dict)
+    if model:
+        mlflow.lightgbm.log_model(model, artifact_path=model_nm)
+        model_uri = f"runs:/{run.info.run_id}/lightgbm-model"
+        mv = mlflow.register_model(model_uri=model_uri, name=model_nm)
+        log.info(f"Logged model={mv.name}, version={mv.version}")
