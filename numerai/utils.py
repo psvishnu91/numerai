@@ -22,6 +22,8 @@ DF = pd.DataFrame
 
 
 def print_and_write(msg, root_dir=""):
+    log_date = f"[datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')] "
+    msg_full = f"{log_date} {msg}"
     with open(os.path.join(root_dir, "log.txt"), "a") as f:
         f.write(msg + "\n")
     print(msg)
@@ -309,6 +311,7 @@ def train_model(
             int8=params["int8"],
         ),
         y=train_df.loc[non_na_index, target],
+        verbose=True,
     )
     log.info(f"saving new model: {model_name}")
     nmr_utils.save_model(
