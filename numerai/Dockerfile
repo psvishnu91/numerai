@@ -13,7 +13,8 @@ RUN apt-get update && \
         git \
         libomp-dev \
         vim \
-        git
+        git \
+        postgresql-client
 COPY requirements-minimal.txt /
 RUN pip install -r /requirements-minimal.txt
 RUN cd / && git clone https://github.com/vispz/numerai.git
