@@ -16,7 +16,7 @@ EXAMPLE_PREDS_COL = "example_preds"
 
 spinner = Halo(text="", spinner="dots")
 
-MODEL_FOLDER = "models"
+MODEL_FOLDER = "./data/models"
 MODEL_CONFIGS_FOLDER = "model_configs"
 PREDICTION_FILES_FOLDER = "prediction_files"
 
@@ -29,18 +29,18 @@ def save_prediction(df, name):
     df.to_csv(f"{PREDICTION_FILES_FOLDER}/{name}.csv", index=True)
 
 
-def save_model(model, name):
+def save_model(model, name, model_folder=MODEL_FOLDER):
     try:
-        Path(MODEL_FOLDER).mkdir(exist_ok=True, parents=True)
+        Path(model_folder).mkdir(exist_ok=True, parents=True)
     except Exception as ex:
         pass
-    pd.to_pickle(model, f"{MODEL_FOLDER}/{name}.pkl")
+    pd.to_pickle(model, f"{model_folder}/{name}.pkl")
 
 
-def load_model(name):
-    path = Path(f"{MODEL_FOLDER}/{name}.pkl")
+def load_model(name, model_folder=MODEL_FOLDER):
+    path = Path(f"{model_folder}/{name}.pkl")
     if path.is_file():
-        model = pd.read_pickle(f"{MODEL_FOLDER}/{name}.pkl")
+        model = pd.read_pickle(f"{model_folder}/{name}.pkl")
     else:
         model = False
     return model
