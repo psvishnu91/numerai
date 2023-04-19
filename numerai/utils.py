@@ -1,4 +1,5 @@
 import configparser
+import datetime
 import functools
 import gc
 import hashlib
@@ -22,11 +23,11 @@ DF = pd.DataFrame
 
 
 def print_and_write(msg, root_dir=""):
-    log_date = f"[datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')] "
+    log_date = f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
     msg_full = f"{log_date} {msg}"
     with open(os.path.join(root_dir, "log.txt"), "a") as f:
-        f.write(msg + "\n")
-    print(msg)
+        f.write(msg_full + "\n")
+    print(msg_full)
 
 
 # HACK: For some reason logging is not working in the notebook.
