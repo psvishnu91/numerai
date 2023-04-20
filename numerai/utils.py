@@ -15,7 +15,7 @@ import urllib
 import mlflow
 import mlflow.entities
 import lightgbm as lgb
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Union, Dict, List
 
 import boto3
 import numpy as np
@@ -48,7 +48,7 @@ log = Logger()
 ########################################################################################
 # MISC UTILS
 ########################################################################################
-def hash_dict(d: dict) -> str:
+def hash_dict(d: Dict) -> str:
     return hashlib.md5(json.dumps(d, sort_keys=True).encode("utf-8")).hexdigest()[:6]
 
 
@@ -57,17 +57,17 @@ def hash_dict(d: dict) -> str:
 ########################################################################################
 
 
-def load_json(fl: str) -> dict:
+def load_json(fl: str) -> Dict:
     with open(fl, "r") as f:
         return json.load(f)
 
 
-def save_json(obj: Union[dict, list], fl: str) -> None:
+def save_json(obj: Union[Dict, List], fl: str) -> None:
     with open(fl, "w") as f:
         json.dump(obj, f, indent=4, sort_keys=True)
 
 
-def listdir_recursive(dir_path: str) -> list:
+def listdir_recursive(dir_path: str) -> List:
     """Recursively list all files in a directory."""
     files = []
     for root, _, files in os.walk(dir_path):
@@ -202,7 +202,7 @@ def read_aws_config(
 ########################################################################################
 
 
-def fmt_features(df: DF, features: list[str], int8: bool, impute: bool) -> DF:
+def fmt_features(df: DF, features: List[str], int8: bool, impute: bool) -> DF:
     if impute:
         df.loc[:, features] = df.loc[:, features].fillna(
             df[features].median(skipna=True)
@@ -222,7 +222,7 @@ def cast_features(df: DF, int8: bool) -> DF:
 
 def download_data(
     version: str, data_path: str, as_int8: bool, include_live: bool = True
-) -> dict[str, str]:
+) -> Dict[str, str]:
     """Downloads training data.
 
     :version: Version of the data (ex: `'v4.1'`).
@@ -286,7 +286,7 @@ def sample_within_eras(df: DF, frac: float) -> DF:
     return df.groupby("era").apply(lambda x: x.sample(frac=frac, random_state=42))
 
 
-def get_era_to_date(eras: list[int], offset_wks=12):
+def get_era_to_date(eras: List[int], offset_wks=12):
     """Returns a mapping from era to the date associated with that era.
 
     Each era is a week long and the most recent era is offset weeks back. We can
@@ -325,8 +325,8 @@ def download_fls(
 
 def get_df_loader(
     data_path: str,
-    features: list[str],
-    read_cols: list[str],
+    features: List[str],
+    read_cols: List[str],
     sample_every_nth: int,
     impute: bool,
     int8: bool,
@@ -351,7 +351,7 @@ def get_df_loader(
 def build_cols_to_read(
     feature_json_fl: str,
     feature_set_name: Optional[str] = None,
-) -> list[str]:
+) -> List[str]:
     """Builds a list of columns to read from the downloaded data."""
     # read the feature metadata and get a feature set (or all the features)
     with open(feature_json_fl, "r") as f:
@@ -380,10 +380,10 @@ def subsample_every_nth_era(df: DF, n: int = 4) -> DF:
 def train_model(
     train_df: pd.DataFrame,
     model_rootdir: str,
-    features: list[str],
+    features: List[str],
     target: str,
     train_data_ident: str,
-    params: dict,
+    params: Dict,
     model_name: Optional[str] = None,
     overwrite=False,
 ) -> lgb.LGBMRegressor:
@@ -447,9 +447,9 @@ def get_pred_col(target):
 def log_mflow(
     run: mlflow.entities.Run,
     target: Optional[str] = None,
-    params: Optional[dict] = None,
+    params: Optional[Dict] = None,
     train_ident: Optional[str] = None,
-    metrics_dict: Optional[dict] = None,
+    metrics_dict: Optional[Dict] = None,
     model: Optional[object] = None,
     model_nm: Optional[str] = None,
 ):
@@ -476,15 +476,15 @@ def group_eras_into_bins(df, era_col, bin_col_nm, biz_sz):
 def build_models_for_all_targets(
     train_df: pd.DataFrame,
     test_df: pd.DataFrame,
-    features: list,
+    features: List,
     train_ident: str,
-    targets: list[str],
-    raw_predn_cols: list[str],
+    targets: List[str],
+    raw_predn_cols: List[str],
     model_rootdir: str,
-    params: dict,
+    params: Dict,
     expt_id: str,
     suffix: str = "",
-    models: Optional[dict[str, object]] = None,
+    models: Optional[Dict[str, object]] = None,
 ) -> None:
     """Builds a model for each target in targets.
 
@@ -516,14 +516,14 @@ def build_models_for_all_targets(
 def build_model_for_target(
     train_df: pd.DataFrame,
     test_df: pd.DataFrame,
-    features: list[str],
+    features: List[str],
     train_ident: str,
     target: str,
     model_rootdir: str,
-    params: dict,
+    params: Dict,
     expt_id: str,
     suffix: str = "",
-) -> dict[str, object]:
+) -> Dict[str, object]:
     """Builds a model for a single target.
 
     This function will build a model for a single target. It will then
