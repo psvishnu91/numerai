@@ -1,4 +1,5 @@
 boto3
+cufflinks
 flatdict
 halo
 mlflow

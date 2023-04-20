@@ -1,5 +1,8 @@
 import configparser
 import datetime
+import pickle
+import time
+import flatdict
 import functools
 import gc
 import hashlib
@@ -17,6 +20,7 @@ from typing import Callable, Optional, Union
 import boto3
 import numpy as np
 import pandas as pd
+from tqdm.notebook import tqdm
 import nmr_utils
 import numerapi
 
@@ -61,6 +65,25 @@ def load_json(fl: str) -> dict:
 def save_json(obj: Union[dict, list], fl: str) -> None:
     with open(fl, "w") as f:
         json.dump(obj, f, indent=4, sort_keys=True)
+
+
+def listdir_recursive(dir_path: str) -> list:
+    """Recursively list all files in a directory."""
+    files = []
+    for root, _, files in os.walk(dir_path):
+        for filename in files:
+            files.append(os.path.join(root, filename))
+    return files
+
+
+def pickle_obj(obj, fl):
+    with open(fl, "wb") as f:
+        pickle.dump(obj, f)
+
+
+def unpickle_obj(fl):
+    with open(fl, "rb") as f:
+        return pickle.load(f)
 
 
 ########################################################################################
@@ -258,6 +281,27 @@ def _download_live_dataset(version: str, data_path: str, dtype_suf: str) -> str:
     return live_dst
 
 
+def sample_within_eras(df: DF, frac: float) -> DF:
+    """Sample rows within each era."""
+    return df.groupby("era").apply(lambda x: x.sample(frac=frac, random_state=42))
+
+
+def get_era_to_date(eras: list[int], offset_wks=12):
+    """Returns a mapping from era to the date associated with that era.
+
+    Each era is a week long and the most recent era is offset weeks back. We can
+    use this information to walk back in time and find the date associated with
+    any era.
+    """
+    # Get the date associated with each era.
+    era_to_date = {}
+    for i, era in enumerate(reversed(eras)):
+        era_to_date[era] = (
+            datetime.datetime.today() - datetime.timedelta(weeks=i + offset_wks)
+        ).strftime("%Y-%m-%d")
+    return era_to_date
+
+
 def download_fls(
     data_path,
     s3_path,
@@ -342,13 +386,14 @@ def train_model(
     params: dict,
     model_name: Optional[str] = None,
     overwrite=False,
-):
+) -> lgb.LGBMRegressor:
     """Trains a model and saves it to disk.
 
     This function will check if a model with the same name already exists in the
     model_rootdir. If it does, it will not retrain the model. If it does not, it will
     train a new model and save it to disk.
     """
+    st_time = time.time()
     model_name = model_name or build_model_name(
         train_data_ident=train_data_ident,
         target=target,
@@ -381,6 +426,7 @@ def train_model(
         name=model_name,
         model_folder=model_folder,
     )
+    log.info(f"Training time: {(time.time() - st_time) / 60:.2f} minutes")
     return train_model
 
 
@@ -416,3 +462,135 @@ def log_mflow(
         model_uri = f"runs:/{run.info.run_id}/lightgbm-model"
         mv = mlflow.register_model(model_uri=model_uri, name=model_nm)
         log.info(f"Logged model={mv.name}, version={mv.version}")
+
+
+def group_eras_into_bins(df, era_col, bin_col_nm, biz_sz):
+    """Groups eras into bins of biz_sz eras each."""
+    eras = df[era_col].unique()
+    era_bins = np.array_split(eras, len(eras) / biz_sz)
+    era_bin_map = {era: i for i, era_bin in enumerate(era_bins) for era in era_bin}
+    df[bin_col_nm] = df[era_col].map(era_bin_map)
+    return df
+
+
+def build_models_for_all_targets(
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    features: list,
+    train_ident: str,
+    targets: list[str],
+    raw_predn_cols: list[str],
+    model_rootdir: str,
+    params: dict,
+    expt_id: str,
+    suffix: str = "",
+    models: Optional[dict[str, object]] = None,
+) -> None:
+    """Builds a model for each target in targets.
+
+    This function will build a model for each target in targets. It will then
+    save the model to disk and log the model to mlflow.
+
+    models is map from target to the models that are built.
+    """
+    for i, target in tqdm(
+        enumerate(targets, start=1), desc="Each target", total=len(targets)
+    ):
+        log.info(f"Building model for target={target}; {i}/{len(targets)}")
+        model_build_result = build_model_for_target(
+            train_df=train_df,
+            test_df=test_df,
+            features=features,
+            train_ident=train_ident,
+            target=target,
+            model_rootdir=model_rootdir,
+            params=params,
+            expt_id=expt_id,
+            suffix=suffix,
+        )
+        if models is not None:
+            models[target] = model_build_result["model"]
+        raw_predn_cols.append(model_build_result["predn_col"])  # type: ignore
+
+
+def build_model_for_target(
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    features: list[str],
+    train_ident: str,
+    target: str,
+    model_rootdir: str,
+    params: dict,
+    expt_id: str,
+    suffix: str = "",
+) -> dict[str, object]:
+    """Builds a model for a single target.
+
+    This function will build a model for a single target. It will then
+    save the model to disk and log the model to mlflow. The predictions
+    will be added to the test_df as a column with the name of the target and
+    the suffix. The model will be added to the models dict.
+
+    HACK: Mutates test_df.
+
+    :param suffix: This is suffixed to the prediction column name and the model name.
+        Useful when building model for different xval splits (suffix = "_cv{i}").
+    """
+    # Train model
+    model_nm = build_model_name(
+        train_data_ident=train_ident,
+        target=target,
+        params=params,
+        suffix=suffix,
+    )
+    run = mlflow.start_run(run_name=model_nm, experiment_id=expt_id)
+    model = train_model(
+        train_df=train_df,
+        features=features,
+        target=target,
+        params=params,
+        train_data_ident=train_ident,
+        model_name=model_nm,
+        model_rootdir=model_rootdir,
+    )
+    # Predict with model
+    # add cross validation split or other ident to the prediction column name
+    predn_col = f"{get_pred_col(target)}{suffix}"
+    test_df[predn_col] = predict(
+        pred_df=test_df[features], model=model, parameters=params
+    )
+    # Compute metrics
+    validation_stats = nmr_utils.validation_metrics(
+        validation_data=test_df,
+        pred_cols=[predn_col],
+        example_col=None,
+        fast_mode=True,
+        target_col=nmr_utils.TARGET_COL,
+        include_mmc=False,
+    )
+    # Log metrics to mlflow
+    log_mflow(
+        metrics_dict=validation_stats.iloc[0].to_dict(),
+        model=model,
+        target=target,
+        model_nm=model_nm,
+        run=run,
+        params=flatdict.FlatDict(params, delimiter="."),
+    )
+    mlflow.end_run()
+    return {
+        "model": model,
+        "model_name": model_nm,
+        "predn_col": predn_col,
+        "validation_stats": validation_stats,
+        "run": run,
+    }
+
+
+def fmt_metrics_df(metrics_df):
+    """Converts metrics columns into bar plots and formats as percentages.
+    See https://pasteboard.co/79IY9Trd8M9C.png
+    """
+    return metrics_df.style.bar(color=["#d65f5f", "#5fba7d"], align="zero").format(
+        "{:.2%}"
+    )
