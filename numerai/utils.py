@@ -18,6 +18,7 @@ import boto3
 import numpy as np
 import pandas as pd
 import nmr_utils
+import numerai
 
 DF = pd.DataFrame
 
@@ -194,6 +195,67 @@ def cast_features(df: DF, int8: bool) -> DF:
 ########################################################################################
 # DATA LOADING
 ########################################################################################
+
+
+def download_data(
+    version: str, data_path: str, as_int8: bool, include_live: bool = True
+) -> dict[str, str]:
+    """Downloads training data.
+
+    :version: Version of the data (ex: `'v4.1'`).
+    :param data_path: where data is to be saved.
+    :param as_int8: If set to true, we will download files in int8 format.
+         if you remove the int8 suffix for each of these files, you'll
+         get features between 0 and 1 as floats. int_8 files are much smaller...
+         but are harder to work with because some packages don't like ints and
+         the way NAs are encoded.
+    Sample output::
+
+        {
+            "train": "/path/to/train.parquet",
+            "test": "/path/to/validation.parquet",
+            "features_json": "/path/to/features.json",
+            "val_example": "/path/to/validation_example_preds.parquet",
+            "live": "/path/to/live.parquet",
+        }
+    """
+    # A mapping from to an easy name to the downloaded fl path
+    downloaded_fl_map = {}
+    napi = numerapi.NumerAPI()
+    os.makedirs(data_path, exist_ok=True)
+    print("Downloading dataset files...")
+    dtype_suf = "_int8" if as_int8 else ""
+    for fl_key, fl in [
+        ("train", f"train{dtype_suf}.parquet"),
+        ("test", f"validation{dtype_suf}.parquet"),
+        ("features_json", "features.json"),
+        ("val_example", "validation_example_preds.parquet"),
+    ]:
+        src = os.path.join(version, fl)
+        dst = os.path.join(data_path, src)
+        print(f"Downloading {src} to {dst}...")
+        napi.download_dataset(filename=src, dest_path=dst)
+        downloaded_fl_map[fl_key] = dst
+    if include_live:
+        downloaded_fl_map["live"] = _download_live_dataset(
+            data_path=data_path, version=version, dtype_suf=dtype_suf
+        )
+    return downloaded_fl_map
+
+
+def _download_live_dataset(version: str, data_path: str, dtype_suf: str) -> str:
+    """Downloads the live dataset for the current round.
+    :param dtype_suf: "_int8" or "".
+    """
+    # Tournament data changes every week so we specify the round in their name.
+    napi = numerai.NumerAPI()
+    current_round = napi.get_current_round()
+    print(f"Current round: {current_round}")
+    live_src = f"{version}/live{dtype_suf}.parquet"
+    live_dst = os.path.join(data_path, f"{current_round}/live{dtype_suf}.parquet")
+    print(f"Downloading {live_src} to {live_dst}...")
+    napi.download_dataset(filename=live_src, dest_path=live_dst)
+    return live_dst
 
 
 def download_fls(
