@@ -18,7 +18,7 @@ import boto3
 import numpy as np
 import pandas as pd
 import nmr_utils
-import numerai
+import numerapi
 
 DF = pd.DataFrame
 
@@ -248,7 +248,7 @@ def _download_live_dataset(version: str, data_path: str, dtype_suf: str) -> str:
     :param dtype_suf: "_int8" or "".
     """
     # Tournament data changes every week so we specify the round in their name.
-    napi = numerai.NumerAPI()
+    napi = numerapi.NumerAPI()
     current_round = napi.get_current_round()
     print(f"Current round: {current_round}")
     live_src = f"{version}/live{dtype_suf}.parquet"
