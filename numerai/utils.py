@@ -312,7 +312,6 @@ def train_model(
             int8=params["int8"],
         ),
         y=train_df.loc[non_na_index, target],
-        verbose=True,
     )
     log.info(f"saving new model: {model_name}")
     nmr_utils.save_model(
