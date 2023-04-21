@@ -1,5 +1,5 @@
 # Docker image to run the numerai modelling scripts.
-# docker build  --platform linux/amd64 -t vishnups/numerai-visp .
+# docker build  --platform linux/amd64 -f DockerfileModelling -t vishnups/numerai-visp .
 #  && docker push vishnups/numerai-visp
 FROM python:3.10.0
 RUN apt-get update && \
