@@ -21,3 +21,4 @@ tmux
 jupyter notebook
 ```
 Open up Jupyter at IP:8888/?<token>.
+
