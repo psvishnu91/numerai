@@ -1,4 +1,5 @@
 import configparser
+import dataclasses
 import datetime
 import pickle
 import time
@@ -7,7 +8,6 @@ import functools
 import gc
 import hashlib
 import json
-import logging
 import os
 import os.path
 import urllib
@@ -15,7 +15,7 @@ import urllib
 import mlflow
 import mlflow.entities
 import lightgbm as lgb
-from typing import Callable, Optional, Union, Dict, List
+from typing import Any, Callable, Optional, Union, Dict, List
 
 import boto3
 import numpy as np
@@ -25,6 +25,22 @@ import nmr_utils
 import numerapi
 
 DF = pd.DataFrame
+
+
+########################################################################################
+# Dataclasses
+########################################################################################
+@dataclasses.dataclass
+class WrappedModel:
+    features: Union[list[str], np.ndarray]
+
+    def predict(self, df: DF) -> np.ndarray:
+        raise NotImplementedError
+
+
+########################################################################################
+# Logging defaults utisl
+########################################################################################
 
 
 def print_and_write(msg, root_dir=""):
@@ -260,13 +276,13 @@ def download_data(
         napi.download_dataset(filename=src, dest_path=dst)
         downloaded_fl_map[fl_key] = dst
     if include_live:
-        downloaded_fl_map["live"] = _download_live_dataset(
+        downloaded_fl_map["live"] = download_live_dataset(
             data_path=data_path, version=version, dtype_suf=dtype_suf
         )
     return downloaded_fl_map
 
 
-def _download_live_dataset(version: str, data_path: str, dtype_suf: str) -> str:
+def download_live_dataset(version: str, data_path: str, dtype_suf: str) -> str:
     """Downloads the live dataset for the current round.
     :param dtype_suf: "_int8" or "".
     """
@@ -543,48 +559,57 @@ def build_model_for_target(
         params=params,
         suffix=suffix,
     )
-    run = mlflow.start_run(run_name=model_nm, experiment_id=expt_id)
-    model = train_model(
-        train_df=train_df,
-        features=features,
-        target=target,
-        params=params,
-        train_data_ident=train_ident,
-        model_name=model_nm,
-        model_rootdir=model_rootdir,
-    )
-    # Predict with model
-    # add cross validation split or other ident to the prediction column name
-    predn_col = f"{get_pred_col(target)}{suffix}"
-    test_df[predn_col] = predict(
-        pred_df=test_df[features], model=model, parameters=params
-    )
-    # Compute metrics
-    validation_stats = nmr_utils.validation_metrics(
-        validation_data=test_df,
-        pred_cols=[predn_col],
-        example_col=None,
-        fast_mode=True,
-        target_col=nmr_utils.TARGET_COL,
-        include_mmc=False,
-    )
-    # Log metrics to mlflow
-    log_mflow(
-        metrics_dict=validation_stats.iloc[0].to_dict(),
-        model=model,
-        target=target,
-        model_nm=model_nm,
-        run=run,
-        params=flatdict.FlatDict(params, delimiter="."),
-    )
-    mlflow.end_run()
+    with mlflow.start_run(
+        run_name=f"{suffix}_{model_nm}", experiment_id=expt_id
+    ) as run:
+        model = train_model(
+            train_df=train_df,
+            features=features,
+            target=target,
+            params=params,
+            train_data_ident=train_ident,
+            model_name=model_nm,
+            model_rootdir=model_rootdir,
+        )
+        # Predict with model
+        # add cross validation split or other ident to the prediction column name
+        predn_col = f"{get_pred_col(target)}{suffix}"
+        test_df[predn_col] = predict(
+            pred_df=test_df[features], model=model, parameters=params
+        )
+        # Compute metrics
+        validation_stats = nmr_utils.validation_metrics(
+            validation_data=test_df,
+            pred_cols=[predn_col],
+            example_col=None,
+            fast_mode=True,
+            target_col=nmr_utils.TARGET_COL,
+            include_mmc=False,
+        )
+        # Log metrics to mlflow
+        log_mflow(
+            metrics_dict=validation_stats.iloc[0].to_dict(),
+            model=model,
+            target=target,
+            model_nm=model_nm,
+            run=run,
+            params=flatdict.FlatDict(params, delimiter="."),
+        )
     return {
         "model": model,
         "model_name": model_nm,
         "predn_col": predn_col,
         "validation_stats": validation_stats,
         "run": run,
+        "top_5_lgbm_feature_names": get_top_imp_feats(model, n=5),
     }
+
+
+def get_top_imp_feats(model, n):
+    """Gets the top n important feature names from a lgbm model."""
+    return np.array(model.feature_name_)[
+        np.argsort(model.feature_importances_)[-n:][::-1]
+    ].tolist()
 
 
 def fmt_metrics_df(metrics_df):
@@ -594,3 +619,44 @@ def fmt_metrics_df(metrics_df):
     return metrics_df.style.bar(color=["#d65f5f", "#5fba7d"], align="zero").format(
         "{:.2%}"
     )
+
+
+def cross_validate(
+    train_df: pd.DataFrame,
+    features: List[str],
+    train_ident: str,
+    target: str,
+    model_rootdir: str,
+    params: Dict,
+    expt_id: str,
+    cv: int,
+    suffix: str = "",
+):
+    """Cross validates a model for a single target.
+
+    We use :func:`nmr_utils.get_time_series_cross_val_splits` to get the cross
+    validation split eras as train_test_zip = zip(train_splits, test_splits).
+    Then we build a model for each train-test split and compute the metrics using
+    `build_model_for_target`
+    """
+    cv_mdl_metrics = {}
+    for i, (train_split, test_split) in tqdm(
+        enumerate(nmr_utils.get_time_series_cross_val_splits(data=train_df, cv=cv)),
+        desc="Each cross validation split",
+        total=cv,
+    ):
+        log.info(f"Building model for target={target}; {i+1}/{cv}")
+        train_split_df = train_df[train_df[nmr_utils.ERA_COL].isin(train_split)]
+        test_split_df = train_df[train_df[nmr_utils.ERA_COL].isin(test_split)]
+        cv_mdl_metrics[i] = build_model_for_target(
+            train_df=train_split_df,
+            test_df=test_split_df,
+            features=features,
+            train_ident=train_ident,
+            target=target,
+            model_rootdir=model_rootdir,
+            params=params,
+            expt_id=expt_id,
+            suffix=suffix + f"_cv{i}",
+        )
+    return

@@ -6,6 +6,7 @@ mlflow
 jupyter
 lightgbm
 numerapi
+numerai-cli
 numpy
 pandas
 plotly

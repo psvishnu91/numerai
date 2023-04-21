@@ -9,6 +9,7 @@ __pycache__/
 *$py.class
 **/mlruns/
 **/models/
+**/deploy_models/
 **/*.csv
 **/*.pkl
 **/outputs/**
