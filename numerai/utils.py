@@ -733,11 +733,11 @@ def cross_validate(
         # Build model for target
         suffix_cv = suffix + f"_cv{i}"
         cv_models[i] = train_model(  # type: ignore
-            train_df=train_df,
+            train_df=train_cv_df,
             features=features,
             target=target,
             params=params,
-            train_data_ident=train_ident,
+            train_data_ident=train_ident + f"_cv{i}",
             model_rootdir=model_rootdir,
         )
         # Predict with model
