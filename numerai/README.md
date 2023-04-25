@@ -7,13 +7,18 @@ virtualenv --python=python3.10 .venv && \
     pip freeze > deploy/requirements.txt
 ```
 
-
 # Modelling
 ## Dockerising environment for modelling
 ``` bash
 docker build  --platform linux/amd64 -f Dockerfile -t vishnups/numerai-visp .
   && docker push vishnups/numerai-visp
 ```
+## Setting up aws
+Spin up a `m6a.4xlarge`.
+``` bash
+
+```
+
 
 ## Setting Lambdalabs for training
 ### Commands

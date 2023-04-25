@@ -686,8 +686,39 @@ def fmt_metrics_df(metrics_df):
     """Converts metrics columns into bar plots and formats as percentages.
     See https://pasteboard.co/79IY9Trd8M9C.png
     """
-    return metrics_df.style.bar(color=["#d65f5f", "#5fba7d"], align="zero").format(
-        "{:.2%}"
+    styles = [
+        # table properties
+        dict(
+            selector=" ",
+            props=[
+                ("margin", "0"),
+                ("font-family", '"Helvetica", "Arial", sans-serif'),
+                ("border-collapse", "collapse"),
+                ("border", "none"),
+                ("border", "2px solid #ccf"),
+            ],
+        ),
+        # header color
+        dict(selector="thead", props=[("background-color", "lightblue")]),
+        # background shading
+        dict(selector="tbody tr:nth-child(even)", props=[("background-color", "#fff")]),
+        dict(selector="tbody tr:nth-child(odd)", props=[("background-color", "#eee")]),
+        # cell spacing
+        dict(
+            selector="td",
+            props=[
+                ("padding", ".5em"),
+                ("background-position-x", "initial"),
+                ("background-position-y", "initial"),
+            ],
+        ),
+        # header cell properties
+        dict(selector="th", props=[("font-size", "100%"), ("text-align", "center")]),
+    ]
+    return (
+        metrics_df.style.bar(color=["#d65f5f", "#5fba7d"], align="zero")
+        .format("{:.2%}")
+        .set_table_styles(styles)
     )
 
 
