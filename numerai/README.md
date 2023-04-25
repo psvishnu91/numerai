@@ -8,16 +8,19 @@ virtualenv --python=python3.10 .venv && \
 ```
 
 # Modelling
-## Dockerising environment for modelling
+## Option 1: [EC2] | Setting up aws EC2 instance for model training
+
+### Step 1: Docker build
+In local m/c
 ``` bash
 docker build  --platform linux/amd64 -f Dockerfile -t vishnups/numerai-visp .
   && docker push vishnups/numerai-visp
 ```
-## Setting up aws
-Spin up a `m6a.4xlarge` with ubuntu. Set up security group like below \
-![](https://pasteboard.co/6DQvNjbMBTML.png?o=1)
 
-In local m/c
+### Step 2: Spin up EC2 instance and add aws creds
+Spin up a `m6a.4xlarge` with ubuntu. Set up security group like below \
+<img src="https://gcdnb.pbrd.co/images/6DQvNjbMBTML.png?o=1" width="30%"/>
+
 ``` bash
 # example ubuntu@ec2-3-141-40-156.us-east-2.compute.amazonaws.com
 IP=ubuntu@<ip>
@@ -26,7 +29,8 @@ scp -i $PEM_FILE  ~/.aws/personal_credentials $IP:~/credentials
 ssh -i $PEM_FILE $IP
 ```
 
-Either run the following as is or add it to `setup.sh` and run `bash -x setup.sh`.
+### Step 3: Setup the EC2 instance by install docker
+Either run the following as is or create a `setup.sh` script and run `bash -x setup.sh`.
 ``` bash
 sudo apt-get update
 sudo install -m 0755 -d /etc/apt/keyrings
@@ -46,7 +50,7 @@ cp credentials ~/.aws/credentials
 ```
 
 
-## Setting Lambdalabs for training
+## ## Option 2: [Lambdalabs] | Setting Lambdalabs for training
 ### Commands
 local mc
 ``` bash

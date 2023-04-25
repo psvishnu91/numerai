@@ -16,11 +16,12 @@ RUN apt-get update && \
         git \
         postgresql-client \
         tmux
-COPY requirements-minimal.txt /
-RUN pip install -r /requirements-minimal.txt
+COPY requirements.txt /
+RUN pip install -r /requirements.txt
 RUN cd / && git clone https://github.com/vispz/numerai.git
 # Allow outside access to the notebook server
 RUN jupyter notebook --generate-config \
     && echo "c.NotebookApp.ip = '*'" >> /root/.jupyter/jupyter_notebook_config.py
+RUN mkdir /numerai/data /numerai/.aws/
 WORKDIR /numerai/
 CMD bash
