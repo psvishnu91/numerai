@@ -2,3 +2,5 @@
 **/.venv/**
 **/models/**
 **/downloads/**
+**/*.pkl
+**/*.parquet
