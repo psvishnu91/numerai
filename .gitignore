@@ -13,6 +13,7 @@ __pycache__/
 **/*.csv
 **/*.pkl
 **/outputs/**
+**/**.parquet
 
 # C extensions
 *.so

@@ -6,7 +6,7 @@ use the int8 features.
 
 Usage::
 
-    python predict.py --model-name=<model_name>
+    python predict.py --model-name=<model_name> --dryrun
 
 Supported models:
 1. `nomi_v4_20`
@@ -18,16 +18,26 @@ import os
 import os.path
 import logging
 import pickle
+import sys
 import numerapi
 import pandas as pd
 
-logging.basicConfig(filename="log.txt", filemode="a")
+file_handler = logging.FileHandler(filename="predict.log")
+stdout_handler = logging.StreamHandler(stream=sys.stdout)
+handlers = [file_handler, stdout_handler]
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)s - %(message)s",
+    handlers=handlers,
+)
+logger = logging.getLogger(__name__)
 
 DATA_VERSION = "v4.1"
 ERA_COL = "era"
 DATA_TYPE_COL = "data_type"
 TARGET_COL = "target_nomi_v4_20"
-MODEL_DIR = "./deployed_models/"
+MODEL_DIR = "./models/"
 PREDICTIONS_PATH = "predictions.csv"
 
 DEFAULT_PUBLIC_ID = None
@@ -41,21 +51,31 @@ napi = numerapi.NumerAPI(
 
 def main():
     opts = _parse_opts()
-    model_id = opts.model_id
-    model_path = os.path.join(MODEL_DIR, opts.model_id + ".pkl")
-    logging.info(f"Loading model from {model_id} from {model_path}...")
+    model_name = opts.model_name
+    model_path = os.path.join(MODEL_DIR, model_name + ".pkl")
+    logger.info(f"Loading model from {model_name} from {model_path}...")
     wrapped_model = unpickle_obj(fl=model_path)
     predictions = predict(napi=napi, wrapped_model=wrapped_model)
-    submit(predictions=predictions, model_id=model_id)
+    logger.info(predictions)
+    if opts.dryrun:
+        logger.info("Dry run, not uploading predictions")
+    else:
+        submit(predictions=predictions, model_id=os.getenv("MODEL_ID"))
 
 
 def _parse_opts():
     parser = argparse.ArgumentParser(description="Numerai live prediction script")
     parser.add_argument(
-        "--model-id",
+        "--model-name",
         type=str,
-        help="Model ID to use for predictions",
-        default=os.getenv("MODEL_ID"),
+        help="Model name to use for predictions",
+        required=True,
+    )
+    parser.add_argument(
+        "--dryrun",
+        action="store_true",
+        help="Dry run, do not upload predictions",
+        default=False,
     )
     return parser.parse_args()
 
@@ -66,24 +86,18 @@ def unpickle_obj(fl):
 
 
 def predict(napi, wrapped_model):
-    logging.info("reading prediction data")
-    napi.download_dataset(f"{DATA_VERSION}/live.parquet")
-    predict_data = pd.read_parquet(
-        f"{DATA_VERSION}/live.parquet",
-        columns=wrapped_model.features,
-    )
-    logging.info("generating predictions")
-    predictions = wrapped_model.predict(
-        predict_data.filter(like="feature_", axis="columns")
-    )
-    predictions = pd.DataFrame(
-        predictions, columns=["prediction"], index=predict_data.index
-    )
-    return predictions
+    logger.info("reading prediction data")
+    current_round = napi.get_current_round()
+    dest_fl = f"{DATA_VERSION}/live_{current_round}.parquet"
+    napi.download_dataset(filename=f"{DATA_VERSION}/live.parquet", dest_path=dest_fl)
+    logger.info(f"Downloaded live data to {dest_fl}...")
+    predict_data = pd.read_parquet(dest_fl)
+    logger.info("generating predictions")
+    return wrapped_model.predict(predict_data)
 
 
 def submit(predictions, model_id, predict_output_path=PREDICTIONS_PATH):
-    logging.info("writing predictions to file and submitting")
+    logger.info("writing predictions to file and submitting")
     predictions.to_csv(predict_output_path)
     napi.upload_predictions(predict_output_path, model_id=model_id)
 

@@ -1,42 +1,42 @@
 import configparser
-import dataclasses
+import tempfile
+from sklearn.model_selection._split import indexable
+import contextlib
 import datetime
-import pickle
-import time
-import flatdict
 import functools
 import gc
 import hashlib
 import json
 import os
 import os.path
+import pickle
+import time
 import urllib
-
-import mlflow
-import mlflow.entities
-import lightgbm as lgb
-from typing import Any, Callable, Optional, Union, Dict, List
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import boto3
+import flatdict
+import lightgbm as lgb
+import mlflow
+import mlflow.entities
+import numerapi
 import numpy as np
 import pandas as pd
+import scipy
+from scipy import stats
 from tqdm.notebook import tqdm
-import nmr_utils
-import numerapi
+
+ERA_COL = "era"
+TARGET_COL = "target_cyrus_v4_20"
+DATA_TYPE_COL = "data_type"
+EXAMPLE_PREDS_COL = "example_preds"
+
+MODEL_FOLDER = "./data/models"
+MODEL_CONFIGS_FOLDER = "model_configs"
+PREDICTION_FILES_FOLDER = "prediction_files"
 
 DF = pd.DataFrame
-
-
-########################################################################################
-# Dataclasses
-########################################################################################
-@dataclasses.dataclass
-class WrappedModel:
-    features: Union[list[str], np.ndarray]
-
-    def predict(self, df: DF) -> np.ndarray:
-        raise NotImplementedError
-
 
 ########################################################################################
 # Logging defaults utisl
@@ -102,9 +102,76 @@ def unpickle_obj(fl):
         return pickle.load(f)
 
 
+def save_model(model, name, model_folder=MODEL_FOLDER):
+    try:
+        Path(model_folder).mkdir(exist_ok=True, parents=True)
+    except Exception as ex:
+        pass
+    pd.to_pickle(model, f"{model_folder}/{name}.pkl")
+
+
+def load_model(name, model_folder=MODEL_FOLDER):
+    path = Path(f"{model_folder}/{name}.pkl")
+    if path.is_file():
+        model = pd.read_pickle(f"{model_folder}/{name}.pkl")
+    else:
+        model = False
+    return model
+
+
 ########################################################################################
 # AWS UTILS
 ########################################################################################
+def download_from_s3_recursively(
+    s3_path: str,
+    local_path: str,
+    aws_credential_fl: str,
+    aws_profile: str = "default",
+    overwrite: bool = False,
+    dry_run: bool = False,
+    flatten: bool = False,
+    flname: Optional[str] = None,
+) -> None:
+    """Sample usage::
+
+    download_from_s3_recursively(
+        s3_path="s3://bucket/prefix/",
+        local_path="/path/to/dir",
+        aws_credential_fl="~/.aws/credentials",
+    )
+    :param flatten: If True, all files will be downloaded to local_path.
+    :param flname: If passed only files with this name will be downloaded.
+    """
+    # download files in s3_path recursively to local_path
+    boto_session = build_boto_session(
+        aws_credential_fl=aws_credential_fl, aws_profile=aws_profile
+    )
+    s3 = boto_session.resource("s3")
+    bucket = urllib.parse.urlparse(s3_path).netloc
+    prefix = urllib.parse.urlparse(s3_path).path.lstrip("/")
+    for obj in s3.Bucket(bucket).objects.filter(Prefix=prefix):
+        if flname is not None and not obj.key.endswith(flname):
+            continue
+        s3_fl = f"s3://{bucket}/{obj.key}"
+        if flatten:
+            local_fl = os.path.join(local_path, os.path.basename(obj.key))
+        else:
+            local_fl = os.path.join(
+                local_path, os.path.relpath(path=obj.key, start=prefix)
+            )
+        os.makedirs(os.path.dirname(local_fl), exist_ok=True)
+        if dry_run:
+            log.info(f"[DRYRUN] Would download {s3_fl} to {local_fl}")
+        elif os.path.exists(local_fl) and not overwrite:
+            log.info(
+                f"Would have downloaded {s3_fl} to {local_fl}. "
+                f"But {local_fl} exists. Will not download again ..."
+            )
+        else:
+            log.info(f"Downloading {s3_fl} to {local_fl}")
+            s3.meta.client.download_file(Bucket=bucket, Key=obj.key, Filename=local_fl)
+
+
 def download_s3_file(
     s3_path: str,
     local_path: str,
@@ -223,6 +290,7 @@ def fmt_features(df: DF, features: List[str], int8: bool, impute: bool) -> DF:
         df.loc[:, features] = df.loc[:, features].fillna(
             df[features].median(skipna=True)
         )
+    df[ERA_COL] = df[ERA_COL].astype(int)
     df.loc[:, features] = df.loc[:, features].astype(np.int8 if int8 else np.float32)
     return df
 
@@ -378,14 +446,14 @@ def build_cols_to_read(
         features = list(feature_metadata["feature_stats"])
     target_cols = feature_metadata["targets"]
     # read in just those features along with era and target columns
-    return features + target_cols + [nmr_utils.ERA_COL, nmr_utils.DATA_TYPE_COL]
+    return features + target_cols + [ERA_COL, DATA_TYPE_COL]
 
 
 def subsample_every_nth_era(df: DF, n: int = 4) -> DF:
     if n == 1:
         return df
-    every_nth_era = set(df[nmr_utils.ERA_COL].unique()[::n])  # type: ignore
-    return df[df[nmr_utils.ERA_COL].isin(every_nth_era)]  # type: ignore
+    every_nth_era = set(df[ERA_COL].unique()[::n])  # type: ignore
+    return df[df[ERA_COL].isin(every_nth_era)]  # type: ignore
 
 
 ########################################################################################
@@ -395,11 +463,11 @@ def subsample_every_nth_era(df: DF, n: int = 4) -> DF:
 
 def train_model(
     train_df: pd.DataFrame,
-    model_rootdir: str,
     features: List[str],
     target: str,
     train_data_ident: str,
     params: Dict,
+    model_rootdir: Optional[str] = None,
     model_name: Optional[str] = None,
     overwrite=False,
 ) -> lgb.LGBMRegressor:
@@ -415,10 +483,10 @@ def train_model(
         target=target,
         params=params,
     )
-    model_folder = os.path.join(model_rootdir, train_data_ident)
-    if not overwrite:
+    if not overwrite and model_rootdir is not None:
+        model_folder = os.path.join(model_rootdir, train_data_ident)
         log.info(f"Checking for existing model '{model_name}'")
-        train_model = nmr_utils.load_model(
+        train_model = load_model(
             name=model_name,
             model_folder=model_folder,
         )
@@ -437,11 +505,13 @@ def train_model(
         y=train_df.loc[non_na_index, target],
     )
     log.info(f"saving new model: {model_name}")
-    nmr_utils.save_model(
-        model=train_model,
-        name=model_name,
-        model_folder=model_folder,
-    )
+    if model_rootdir is not None:
+        model_folder = os.path.join(model_rootdir, train_data_ident)
+        save_model(
+            model=train_model,
+            name=model_name,
+            model_folder=model_folder,
+        )
     log.info(f"Training time: {(time.time() - st_time) / 60:.2f} minutes")
     return train_model
 
@@ -449,7 +519,7 @@ def train_model(
 def build_model_name(train_data_ident, target, params, suffix="") -> str:
     """Creates a unique name for a model based on training
     data, target col and settings"""
-    return f"{train_data_ident}_{target}{suffix}_{hash_dict(params)}"
+    return f"{suffix}_{train_data_ident}_{target}_{hash_dict(params)}"
 
 
 def predict(pred_df, model, parameters):
@@ -535,9 +605,9 @@ def build_model_for_target(
     features: List[str],
     train_ident: str,
     target: str,
-    model_rootdir: str,
     params: Dict,
-    expt_id: str,
+    model_rootdir: Optional[str] = None,
+    expt_id: Optional[str] = None,
     suffix: str = "",
 ) -> Dict[str, object]:
     """Builds a model for a single target.
@@ -559,9 +629,11 @@ def build_model_for_target(
         params=params,
         suffix=suffix,
     )
-    with mlflow.start_run(
-        run_name=f"{suffix}_{model_nm}", experiment_id=expt_id
-    ) as run:
+    if expt_id is not None:
+        ctx = mlflow.start_run(run_name=f"{model_nm}", experiment_id=expt_id)
+    else:
+        ctx = contextlib.suppress()
+    with ctx as run:
         model = train_model(
             train_df=train_df,
             features=features,
@@ -578,23 +650,21 @@ def build_model_for_target(
             pred_df=test_df[features], model=model, parameters=params
         )
         # Compute metrics
-        validation_stats = nmr_utils.validation_metrics(
+        validation_stats = validation_metrics(
             validation_data=test_df,
             pred_cols=[predn_col],
-            example_col=None,
-            fast_mode=True,
-            target_col=nmr_utils.TARGET_COL,
-            include_mmc=False,
+            target_col=TARGET_COL,
         )
-        # Log metrics to mlflow
-        log_mflow(
-            metrics_dict=validation_stats.iloc[0].to_dict(),
-            model=model,
-            target=target,
-            model_nm=model_nm,
-            run=run,
-            params=flatdict.FlatDict(params, delimiter="."),
-        )
+        if run is not None:
+            # Log metrics to mlflow
+            log_mflow(
+                metrics_dict=validation_stats.iloc[0].to_dict(),
+                model=model,
+                target=target,
+                model_nm=model_nm,
+                run=run,
+                params=flatdict.FlatDict(params, delimiter="."),
+            )
     return {
         "model": model,
         "model_name": model_nm,
@@ -624,39 +694,196 @@ def fmt_metrics_df(metrics_df):
 def cross_validate(
     train_df: pd.DataFrame,
     features: List[str],
-    train_ident: str,
     target: str,
-    model_rootdir: str,
     params: Dict,
-    expt_id: str,
     cv: int,
+    train_ident: str = "",
+    model_rootdir: Optional[str] = None,
+    expt_id: Optional[str] = None,
     suffix: str = "",
+    val_target: Optional[str] = None,
 ):
     """Cross validates a model for a single target.
 
-    We use :func:`nmr_utils.get_time_series_cross_val_splits` to get the cross
+    We use :func:`get_time_series_cross_val_splits` to get the cross
     validation split eras as train_test_zip = zip(train_splits, test_splits).
     Then we build a model for each train-test split and compute the metrics using
     `build_model_for_target`
+
+    :param val_target: If not None, then we use the `target` used to train the model
+    as the validation target. Using a different validation target is useful when
+    we want to validate say a model trained on jerome is useful to predict on nomi.
     """
-    cv_mdl_metrics = {}
+    val_target = val_target or target
+    log.info(f"Validation target: `{val_target}`")
+    cv_metric_dfs, cv_models = [None] * cv, [None] * cv
     for i, (train_split, test_split) in tqdm(
-        enumerate(nmr_utils.get_time_series_cross_val_splits(data=train_df, cv=cv)),
+        enumerate(time_series_split(df=train_df, n_splits=cv)),  # type: ignore
         desc="Each cross validation split",
         total=cv,
     ):
         log.info(f"Building model for target={target}; {i+1}/{cv}")
-        train_split_df = train_df[train_df[nmr_utils.ERA_COL].isin(train_split)]
-        test_split_df = train_df[train_df[nmr_utils.ERA_COL].isin(test_split)]
-        cv_mdl_metrics[i] = build_model_for_target(
-            train_df=train_split_df,
-            test_df=test_split_df,
+        train_cv_df = train_df.iloc[train_split]
+        test_cv_df = train_df.iloc[test_split]
+        # Log train and test split info
+        train_era_rng = (train_cv_df[ERA_COL].min(), train_cv_df[ERA_COL].max())
+        test_era_rng = (test_cv_df[ERA_COL].min(), test_cv_df[ERA_COL].max())
+        log.info(f"Train split: {train_cv_df.shape}, min, max era: {train_era_rng}")
+        log.info(f"Test split: {test_cv_df.shape}, min, max era: {test_era_rng}")
+        # Build model for target
+        suffix_cv = suffix + f"_cv{i}"
+        cv_models[i] = train_model(  # type: ignore
+            train_df=train_df,
             features=features,
-            train_ident=train_ident,
             target=target,
-            model_rootdir=model_rootdir,
             params=params,
-            expt_id=expt_id,
-            suffix=suffix + f"_cv{i}",
+            train_data_ident=train_ident,
+            model_rootdir=model_rootdir,
         )
-    return
+        # Predict with model
+        # add cross validation split or other ident to the prediction column name
+        predn_col = f"{get_pred_col(target)}{suffix_cv}"
+        test_cv_df[predn_col] = predict(
+            pred_df=test_cv_df[features], model=cv_models[i], parameters=params
+        )
+        # Compute metrics
+        cv_metric_dfs[i] = validation_metrics(  # type: ignore
+            validation_data=test_cv_df,
+            pred_cols=[predn_col],
+            target_col=val_target,
+        )
+    # Aggregate metrics across cross validation splits
+    metrics = to_cv_agg_df(cv_metric_dfs)
+    retval = {"models": cv_models, "metrics": metrics}
+    if expt_id is None:
+        return retval
+    else:
+        # Log metrics to mlflow
+        with mlflow.start_run(run_name=f"{suffix}_avg_cv", experiment_id=expt_id):
+            mlflow.log_params({"train_ident": train_ident, "target": target, **params})
+            mlflow.log_metrics(metrics.loc["cv_mean"].to_dict())
+            # save formatted metrics to a temp file.
+            with tempfile.NamedTemporaryFile(
+                prefix="cv_metrics_df", suffix=".html"
+            ) as tmp:
+                fmt_metrics_df(metrics).to_html(tmp.name)
+                mlflow.log_artifact(tmp.name)
+        return retval
+
+
+def to_cv_agg_df(cv_metric_dfs):
+    cv_val_df = pd.concat([mdf.transpose() for mdf in cv_metric_dfs])
+    cv_mean = cv_val_df.mean(axis=0)
+    cv_std = cv_val_df.std(axis=0)
+    cv_std_err = cv_std / len(cv_val_df) ** 0.5
+    cv_ci_low = cv_mean - 1.96 * cv_std_err
+    cv_ci_high = cv_mean + 1.96 * cv_std_err
+    cv_val_df.loc["cv_mean"] = cv_mean
+    cv_val_df.loc["cv_low"] = cv_ci_low
+    cv_val_df.loc["cv_high"] = cv_ci_high
+    cv_val_df.loc["cv_std"] = cv_std
+    return cv_val_df
+
+
+########################################################################################
+# Neutralisation & metrics
+
+
+def neutralize(
+    df,
+    columns,
+    neutralizers=None,
+    proportion=1.0,
+    normalize=True,
+    era_col="era",
+    verbose=False,
+):
+    if neutralizers is None:
+        neutralizers = []
+    unique_eras = df[era_col].unique()
+    computed = []
+    if verbose:
+        iterator = tqdm(unique_eras)
+    else:
+        iterator = unique_eras
+    for u in iterator:
+        df_era = df[df[era_col] == u]
+        scores = df_era[columns].values.astype(np.float32)
+        if normalize:
+            scores2 = []
+            for x in scores.T:
+                x = (scipy.stats.rankdata(x, method="ordinal") - 0.5) / len(x)
+                x = scipy.stats.norm.ppf(x)
+                scores2.append(x)
+            scores = np.array(scores2).T.astype(np.float32)
+        exposures = df_era[neutralizers].values.astype(np.float32)
+        scores -= proportion * exposures.dot(
+            np.linalg.pinv(exposures, rcond=1e-6).dot(scores)
+        )
+        scores /= scores.std(ddof=0)
+        computed.append(scores)
+    return pd.DataFrame(np.concatenate(computed), columns=columns, index=df.index)
+
+
+def numerai_corr2(preds, target):
+    # rank (keeping ties) then Gaussianize predictions to standardize prediction distributions
+    ranked_preds = (preds.rank(method="average").values - 0.5) / preds.count()
+    gauss_ranked_preds = stats.norm.ppf(ranked_preds)
+    # make targets centered around 0. This assumes the targets have a mean of 0.5
+    centered_target = target - 0.5
+    # raise both preds and target to the power of 1.5 to accentuate the tails
+    preds_p15 = np.sign(gauss_ranked_preds) * np.abs(gauss_ranked_preds) ** 1.5
+    target_p15 = np.sign(centered_target) * np.abs(centered_target) ** 1.5
+    # finally return the Pearson correlation
+    return np.corrcoef(preds_p15, target_p15)[0, 1]
+
+
+def validation_metrics(validation_data, pred_cols, target_col=TARGET_COL):
+    validation_stats = pd.DataFrame()
+    for pred_col in pred_cols:
+        # Check the per-era correlations on the validation set (out of sample)
+        validation_correlations = validation_data.groupby(ERA_COL).apply(
+            lambda d: numerai_corr2(d[pred_col], d[target_col])
+        )
+        mean = validation_correlations.mean()
+        std = validation_correlations.std(ddof=0)
+        sharpe = mean / std
+        validation_stats.loc["mean", pred_col] = mean
+        validation_stats.loc["std", pred_col] = std
+        validation_stats.loc["sharpe", pred_col] = sharpe
+    return validation_stats
+
+
+def time_series_split(df, n_splits):
+    """Taken from https://forum.numer.ai/t/era-wise-time-series-cross-validation/791
+
+    This function is a generator that yields (train_index, test_index) splits
+    for time series data. We ensure that the test set is always after the
+    train set. The indices are the row numbers of the original DataFrame.
+
+    Usage::
+
+        for train_ix, test_ix in time_series_split(df, n_splits=3):
+            train_df, test_df = df.iloc[train_ix], df.iloc[test_ix]
+    """
+    n_samples = df.shape[0]
+    groups = df[ERA_COL].astype(int)
+    n_folds = n_splits + 1
+    group_list = np.unique(groups)  # type: ignore
+    n_groups = len(group_list)
+    if n_folds > n_groups:
+        raise ValueError(
+            (
+                "Cannot have number of folds ={0} greater"
+                " than the number of samples: {1}."
+            ).format(n_folds, n_groups)
+        )
+    indices = np.arange(n_samples)
+    test_size = n_groups // n_folds
+    test_starts = range(test_size + n_groups % n_folds, n_groups, test_size)
+    test_starts = list(test_starts)[::-1]
+    for test_start in test_starts:
+        yield (
+            indices[groups.isin(group_list[:test_start])],  # type: ignore
+            indices[groups.isin(group_list[test_start : test_start + test_size])],  # type: ignore
+        )

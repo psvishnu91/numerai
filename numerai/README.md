@@ -19,17 +19,18 @@ docker build  --platform linux/amd64 -f Dockerfile -t vishnups/numerai-visp .
 ### Commands
 local mc
 ``` bash
-scp ~/.aws/personal_credentials <id>:~/
+scp ~/.aws/personal_credentials ubunut@<ip>:~/
 ```
 Remote mc
 ``` bash
 mkdir ~/.aws/ 
 mv ~/personal_credentials ~/.aws/credentials 
-jupyter notebook --generate-config
-echo "c.NotebookApp.ip = '*'" >> /home/ubuntu/.jupyter/jupyter_notebook_config.py
+sudo jupyter notebook --generate-config
+echo "c.NotebookApp.ip = '*'" >> /root/.jupyter/jupyter_notebook_config.py
 git clone https://github.com/vispz/numerai.git
 cd numerai/numerai 
-pip install -r requirements-minimal.txt
+sudo pip install -r requirements-minimal.txt
+sudo pip install -U jupyter
 cd ~
 ```
 

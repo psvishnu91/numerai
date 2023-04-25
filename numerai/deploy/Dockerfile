@@ -32,4 +32,4 @@ ADD $SRC_PATH .
 # This sets the default command to run your docker container.
 # It runs by default in the cloud and when running `numerai node test`.
 # This is overridden when using `numerai node test --command [COMMAND]`.
-CMD [ "python", "./predict.py" ]
+CMD [ "bash", "-x", "predict.sh"]
