@@ -856,6 +856,24 @@ def neutralize(
     return pd.DataFrame(np.concatenate(computed), columns=columns, index=df.index)
 
 
+def validation_metrics(validation_data, pred_cols, target_col=TARGET_COL):
+    validation_stats = pd.DataFrame()
+    for pred_col in pred_cols:
+        # Check the per-era correlations on the validation set (out of sample)
+        validation_correlations = validation_data.groupby(ERA_COL).apply(
+            lambda d: numerai_corr2(d[pred_col], d[target_col])
+        )
+        mean = validation_correlations.mean()
+        # compute the stddev of correlation across the eras to compute the Sharpe ratio.
+        std = validation_correlations.std(ddof=0)
+        # Sharpe ratio of the average per-era correlation (t-statistic)
+        sharpe = mean / std
+        validation_stats.loc["mean", pred_col] = mean
+        validation_stats.loc["std", pred_col] = std
+        validation_stats.loc["sharpe", pred_col] = sharpe
+    return validation_stats
+
+
 def numerai_corr2(preds, target):
     # rank (keeping ties) then Gaussianize predictions to standardize prediction distributions
     ranked_preds = (preds.rank(method="average").values - 0.5) / preds.count()
@@ -867,22 +885,6 @@ def numerai_corr2(preds, target):
     target_p15 = np.sign(centered_target) * np.abs(centered_target) ** 1.5
     # finally return the Pearson correlation
     return np.corrcoef(preds_p15, target_p15)[0, 1]
-
-
-def validation_metrics(validation_data, pred_cols, target_col=TARGET_COL):
-    validation_stats = pd.DataFrame()
-    for pred_col in pred_cols:
-        # Check the per-era correlations on the validation set (out of sample)
-        validation_correlations = validation_data.groupby(ERA_COL).apply(
-            lambda d: numerai_corr2(d[pred_col], d[target_col])
-        )
-        mean = validation_correlations.mean()
-        std = validation_correlations.std(ddof=0)
-        sharpe = mean / std
-        validation_stats.loc["mean", pred_col] = mean
-        validation_stats.loc["std", pred_col] = std
-        validation_stats.loc["sharpe", pred_col] = sharpe
-    return validation_stats
 
 
 def time_series_split(df, n_splits):
