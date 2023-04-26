@@ -8,7 +8,38 @@ virtualenv --python=python3.10 .venv && \
 ```
 
 # Modelling
-## Option 1: [EC2] | Setting up aws EC2 instance for model training
+## ## Option 1: [Lambdalabs] | Setting Lambdalabs for training (Cheaper)
+### Commands
+local mc
+``` bash
+# Example: 165.1.65.156
+IP=
+scp ~/.aws/personal_credentials ubuntu@${IP}:~/
+scp ~/.aws/personal_credentials ubuntu@${IP}:~/
+ssh -A ubuntu@$IP
+```
+Remote mc
+``` bash
+mkdir ~/.aws/ 
+mv ~/personal_credentials ~/.aws/credentials 
+jupyter notebook --generate-config
+echo "c.NotebookApp.ip = '*'" >> /home/ubuntu/.jupyter/jupyter_notebook_config.py
+git clone https://github.com/vispz/numerai.git
+cd numerai/numerai 
+pip install -r requirements-minimal.txt
+pip install -U jupyter
+cd ~
+```
+
+In a tmux shell start a notebook
+``` bash
+tmux
+jupyter notebook
+```
+Open up Jupyter at IP:8888/?<token>.
+
+
+## Option 2: [EC2] | Setting up aws EC2 instance for model training
 
 ### Step 1: Docker build
 In local m/c
@@ -49,32 +80,15 @@ cd ~
 cp credentials ~/.aws/credentials
 ```
 
-
-## ## Option 2: [Lambdalabs] | Setting Lambdalabs for training
-### Commands
-local mc
-``` bash
-IP=
-scp ~/.aws/personal_credentials ubuntu@${IP}:~/
-ssh -A ubuntu@$IP
-```
-Remote mc
-``` bash
-mkdir ~/.aws/ 
-mv ~/personal_credentials ~/.aws/credentials 
-jupyter notebook --generate-config
-echo "c.NotebookApp.ip = '*'" >> /home/ubuntu/.jupyter/jupyter_notebook_config.py
-git clone https://github.com/vispz/numerai.git
-cd numerai/numerai 
-pip install -r requirements-minimal.txt
-pip install -U jupyter
-cd ~
-```
-
-In a tmux shell start a notebook
+### Step 4: Docker run, modelling container
+In a tmux shell in EC2
 ``` bash
 tmux
-jupyter notebook
+PORT=8888 && sudo docker run --interactive -t \
+    -v ~/.aws/credentials:/numerai/.aws/credentials \
+    -v ~/data:/numerai/data/ \
+    --publish "${PORT}":"${PORT}" \
+    --expose="${PORT}" \
+    vishnups/numerai-visp
+jupyter notebook --allow-root
 ```
-Open up Jupyter at IP:8888/?<token>.
-

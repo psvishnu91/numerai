@@ -469,7 +469,6 @@ def train_model(
     params: Dict,
     model_rootdir: Optional[str] = None,
     model_name: Optional[str] = None,
-    overwrite=False,
 ) -> lgb.LGBMRegressor:
     """Trains a model and saves it to disk.
 
@@ -483,7 +482,7 @@ def train_model(
         target=target,
         params=params,
     )
-    if not overwrite and model_rootdir is not None:
+    if model_rootdir is not None:
         model_folder = os.path.join(model_rootdir, train_data_ident)
         log.info(f"Checking for existing model '{model_name}'")
         train_model = load_model(
@@ -504,8 +503,8 @@ def train_model(
         ),
         y=train_df.loc[non_na_index, target],
     )
-    log.info(f"saving new model: {model_name}")
     if model_rootdir is not None:
+        log.info(f"saving new model: {model_name}")
         model_folder = os.path.join(model_rootdir, train_data_ident)
         save_model(
             model=train_model,
@@ -803,6 +802,7 @@ def cross_validate(
 
 
 def to_cv_agg_df(cv_metric_dfs):
+    """Aggregates metrics across cross validation splits."""
     cv_val_df = pd.concat([mdf.transpose() for mdf in cv_metric_dfs])
     cv_mean = cv_val_df.mean(axis=0)
     cv_std = cv_val_df.std(axis=0)
@@ -887,7 +887,7 @@ def numerai_corr2(preds, target):
     return np.corrcoef(preds_p15, target_p15)[0, 1]
 
 
-def time_series_split(df, n_splits):
+def time_series_split(df, n_splits, embargo=12):
     """Taken from https://forum.numer.ai/t/era-wise-time-series-cross-validation/791
 
     This function is a generator that yields (train_index, test_index) splits
@@ -898,25 +898,45 @@ def time_series_split(df, n_splits):
 
         for train_ix, test_ix in time_series_split(df, n_splits=3):
             train_df, test_df = df.iloc[train_ix], df.iloc[test_ix]
+    
+    Sample input::
+        
+        df_fake = pd.DataFrame({"era": np.hstack([np.arange(1,21)])})
+            era
+        0     1
+        1     2
+        ..  ...
+        19   20
+    
+    Sample output::
+
+        time_series_split(df_fake, n_splits=2, embargo=2)
+        Train
+        [ 0  1  2  3  4  5  6  7  8  9 10 11 12 13]
+        Test
+        [15 16 17 18 19]
+
+        Train
+        [0 1 2 3 4 5 6 7]
+        Test
+        [ 9 10 11 12 13]
     """
     n_samples = df.shape[0]
-    groups = df[ERA_COL].astype(int)
+    row_era = df[ERA_COL].astype(int)
     n_folds = n_splits + 1
-    group_list = np.unique(groups)  # type: ignore
-    n_groups = len(group_list)
-    if n_folds > n_groups:
+    uniq_era = np.unique(row_era)  # type: ignore
+    n_eras = len(uniq_era)
+    if n_folds > n_eras:
         raise ValueError(
-            (
-                "Cannot have number of folds ={0} greater"
-                " than the number of samples: {1}."
-            ).format(n_folds, n_groups)
+            f"Cannot have number of folds ={n_folds} greater than the number of "
+            f"eras: {n_eras}."
         )
     indices = np.arange(n_samples)
-    test_size = n_groups // n_folds
-    test_starts = range(test_size + n_groups % n_folds, n_groups, test_size)
+    test_size = n_eras // n_folds
+    test_starts = range(test_size + n_eras % n_folds, n_eras, test_size)
     test_starts = list(test_starts)[::-1]
     for test_start in test_starts:
         yield (
-            indices[groups.isin(group_list[:test_start])],  # type: ignore
-            indices[groups.isin(group_list[test_start : test_start + test_size])],  # type: ignore
+            indices[row_era.isin(uniq_era[:test_start])],  # type: ignore
+            indices[row_era.isin(uniq_era[test_start + embargo - 1 : test_start + test_size])],  # type: ignore
         )
