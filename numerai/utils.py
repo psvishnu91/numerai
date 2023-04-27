@@ -213,6 +213,28 @@ def log_something():
     log.info("Hello World")
 
 
+def upload_s3_file(
+    local_path: str,
+    s3_path: str,
+    aws_credential_fl: str,
+    aws_profile: str = "default",
+    dry_run: bool = False,
+) -> None:
+    """Uploads a local file to s3."""
+    boto_session = build_boto_session(
+        aws_credential_fl=aws_credential_fl, aws_profile=aws_profile
+    )
+    s3 = boto_session.resource("s3")
+    bucket = urllib.parse.urlparse(s3_path).netloc
+    s3_key = urllib.parse.urlparse(s3_path).path.lstrip("/")
+    s3_fl = f"s3://{bucket}/{s3_key}"
+    if dry_run:
+        log.info(f"[DRYRUN] Would upload {local_path} to {s3_fl}")
+    else:
+        log.info(f"Uploading {local_path} to {s3_fl}")
+        s3.meta.client.upload_file(Filename=local_path, Bucket=bucket, Key=s3_key)
+
+
 def upload_to_s3_recursively(
     dir_path: str,
     s3_path: str,
@@ -469,12 +491,16 @@ def train_model(
     params: Dict,
     model_rootdir: Optional[str] = None,
     model_name: Optional[str] = None,
-) -> lgb.LGBMRegressor:
+    model_obj: Optional[Any] = None,
+):
     """Trains a model and saves it to disk.
 
     This function will check if a model with the same name already exists in the
     model_rootdir. If it does, it will not retrain the model. If it does not, it will
     train a new model and save it to disk.
+
+    :param model_obj: If not passed we will create a lgbm model with
+        params["lgbm_params"].
     """
     st_time = time.time()
     model_name = model_name or build_model_name(
@@ -493,7 +519,10 @@ def train_model(
             log.info(f"{model_name} found, will not retrain.")
             return train_model
     log.info(f"Creating new model...")
-    train_model = lgb.LGBMRegressor(**params["lgbm_params"])
+    if model_obj is None:
+        train_model = lgb.LGBMRegressor(**params["lgbm_params"])
+    else:
+        train_model = model_obj
     # skip rows where target is NA
     non_na_index = train_df[target].dropna().index
     train_model.fit(
@@ -783,7 +812,7 @@ def cross_validate(
             target_col=val_target,
         )
     # Aggregate metrics across cross validation splits
-    metrics = to_cv_agg_df(cv_metric_dfs)
+    metrics = to_cv_agg_df(cv_metric_dfs=cv_metric_dfs)
     retval = {"models": cv_models, "metrics": metrics}
     if expt_id is None:
         return retval
@@ -801,7 +830,7 @@ def cross_validate(
         return retval
 
 
-def to_cv_agg_df(cv_metric_dfs):
+def to_cv_agg_df(cv_metric_dfs: List[pd.DataFrame]) -> pd.DataFrame:
     """Aggregates metrics across cross validation splits."""
     cv_val_df = pd.concat([mdf.transpose() for mdf in cv_metric_dfs])
     cv_mean = cv_val_df.mean(axis=0)
@@ -898,28 +927,28 @@ def time_series_split(df, n_splits, embargo=12):
 
         for train_ix, test_ix in time_series_split(df, n_splits=3):
             train_df, test_df = df.iloc[train_ix], df.iloc[test_ix]
-    
+
     Sample input::
-        
-        df_fake = pd.DataFrame({"era": np.hstack([np.arange(1,21)])})
+
+        df_fake = pd.DataFrame({"era": np.hstack([np.arange(0, 40, 4)])})
             era
-        0     1
-        1     2
-        ..  ...
-        19   20
-    
+        0    0
+        1    4
+        ...
+        9   36
+
     Sample output::
 
-        time_series_split(df_fake, n_splits=2, embargo=2)
+        time_series_split(df_fake, n_splits=2, embargo=8)
         Train
-        [ 0  1  2  3  4  5  6  7  8  9 10 11 12 13]
+        [0, 4, 8, 12, 16, 20, 24]
         Test
-        [15 16 17 18 19]
+        [36]  # eras 28, 32 are embargoed out
 
         Train
-        [0 1 2 3 4 5 6 7]
+        [0, 4, 8, 12]
         Test
-        [ 9 10 11 12 13]
+        [24]  # eras 16, 20 are embargoed out
     """
     n_samples = df.shape[0]
     row_era = df[ERA_COL].astype(int)
@@ -936,7 +965,11 @@ def time_series_split(df, n_splits, embargo=12):
     test_starts = range(test_size + n_eras % n_folds, n_eras, test_size)
     test_starts = list(test_starts)[::-1]
     for test_start in test_starts:
+        # The test eras that follow the train eras without embargo
+        test_eras_opts = uniq_era[test_start : test_start + test_size]
+        # Select the eras post the embargo
+        test_eras = test_eras_opts[test_eras_opts > uniq_era[test_start - 1] + embargo]
         yield (
             indices[row_era.isin(uniq_era[:test_start])],  # type: ignore
-            indices[row_era.isin(uniq_era[test_start + embargo - 1 : test_start + test_size])],  # type: ignore
+            indices[row_era.isin(test_eras)],  # type: ignore
         )
