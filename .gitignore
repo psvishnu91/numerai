@@ -15,6 +15,7 @@ __pycache__/
 **/outputs/**
 **/**.parquet
 **/log.txt
+numerai/xgb-test.ipynb
 
 # C extensions
 *.so
