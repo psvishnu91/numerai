@@ -7,6 +7,12 @@ virtualenv --python=python3.10 .venv && \
     pip freeze > deploy/requirements.txt
 ```
 
+# Streaming logs from remote m/c
+``` bash
+# in local m/c
+ssh ubuntu@165.1.64.156  "tail -f numerai/numerai/log.txt"
+```
+
 # Modelling
 ## ## Option 1: [Lambdalabs] | Setting Lambdalabs for training (Cheaper)
 ### Commands
@@ -14,7 +20,6 @@ local mc
 ``` bash
 # Example: 165.1.65.156
 IP=
-scp ~/.aws/personal_credentials ubuntu@${IP}:~/
 scp ~/.aws/personal_credentials ubuntu@${IP}:~/
 ssh -A ubuntu@$IP
 ```
