@@ -118,6 +118,12 @@ def load_model(name, model_folder=MODEL_FOLDER):
         model = False
     return model
 
+def pivot_df(df):
+    """Given a df with two cols alpha and l1_ratio convert it table
+    where rows are alpha and cols are l1_ratio.
+    """
+    return df.pivot(index="alpha", columns="l1_ratio", values="score")
+
 
 ########################################################################################
 # AWS UTILS
