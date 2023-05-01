@@ -97,3 +97,6 @@ PORT=8888 && sudo docker run --interactive -t \
     vishnups/numerai-visp
 jupyter notebook --allow-root
 ```
+#### Step 5: Check the browser
+Ensure you pick up the public IP and go to `http://<ip>:8888?token=<token>` \
+<img src="https://gcdnb.pbrd.co/images/YbRxsBXjhD7D.png?o=1" width="50%"/>
