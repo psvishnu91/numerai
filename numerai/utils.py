@@ -1,6 +1,4 @@
 import configparser
-import tempfile
-from sklearn.model_selection._split import indexable
 import contextlib
 import datetime
 import functools
@@ -10,22 +8,29 @@ import json
 import os
 import os.path
 import pickle
+import re
+import tempfile
 import time
 import urllib
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import boto3
 import flatdict
 import lightgbm as lgb
-import mlflow
 import mlflow.entities
 import numerapi
 import numpy as np
 import pandas as pd
+import plotly.graph_objs as go
 import scipy
+import seaborn as sns
+from matplotlib import pyplot as plt
 from scipy import stats
+from sklearn.model_selection._split import indexable
 from tqdm.notebook import tqdm
+
+import mlflow
 
 ERA_COL = "era"
 TARGET_COL = "target_cyrus_v4_20"
@@ -37,7 +42,35 @@ MODEL_CONFIGS_FOLDER = "model_configs"
 PREDICTION_FILES_FOLDER = "prediction_files"
 
 DF = pd.DataFrame
-
+DF_STYLE = [
+    # table properties
+    dict(
+        selector=" ",
+        props=[
+            ("margin", "0"),
+            ("font-family", '"Helvetica", "Arial", sans-serif'),
+            ("border-collapse", "collapse"),
+            ("border", "none"),
+            ("border", "2px solid #ccf"),
+        ],
+    ),
+    # header color
+    dict(selector="thead", props=[("background-color", "lightblue")]),
+    # background shading
+    dict(selector="tbody tr:nth-child(even)", props=[("background-color", "#fff")]),
+    dict(selector="tbody tr:nth-child(odd)", props=[("background-color", "#eee")]),
+    # cell spacing
+    dict(
+        selector="td",
+        props=[
+            ("padding", ".5em"),
+            ("background-position-x", "initial"),
+            ("background-position-y", "initial"),
+        ],
+    ),
+    # header cell properties
+    dict(selector="th", props=[("font-size", "100%"), ("text-align", "center")]),
+]
 ########################################################################################
 # Logging defaults utisl
 ########################################################################################
@@ -117,6 +150,7 @@ def load_model(name, model_folder=MODEL_FOLDER):
     else:
         model = False
     return model
+
 
 def pivot_df(df):
     """Given a df with two cols alpha and l1_ratio convert it table
@@ -716,44 +750,15 @@ def get_top_imp_feats(model, n):
     ].tolist()
 
 
-def fmt_metrics_df(metrics_df):
+def fmt_metrics_df(metrics_df, add_bar=True):
     """Converts metrics columns into bar plots and formats as percentages.
     See https://pasteboard.co/79IY9Trd8M9C.png
     """
-    styles = [
-        # table properties
-        dict(
-            selector=" ",
-            props=[
-                ("margin", "0"),
-                ("font-family", '"Helvetica", "Arial", sans-serif'),
-                ("border-collapse", "collapse"),
-                ("border", "none"),
-                ("border", "2px solid #ccf"),
-            ],
-        ),
-        # header color
-        dict(selector="thead", props=[("background-color", "lightblue")]),
-        # background shading
-        dict(selector="tbody tr:nth-child(even)", props=[("background-color", "#fff")]),
-        dict(selector="tbody tr:nth-child(odd)", props=[("background-color", "#eee")]),
-        # cell spacing
-        dict(
-            selector="td",
-            props=[
-                ("padding", ".5em"),
-                ("background-position-x", "initial"),
-                ("background-position-y", "initial"),
-            ],
-        ),
-        # header cell properties
-        dict(selector="th", props=[("font-size", "100%"), ("text-align", "center")]),
-    ]
-    return (
-        metrics_df.style.bar(color=["#d65f5f", "#5fba7d"], align="zero")
-        .format("{:.2%}")
-        .set_table_styles(styles)
-    )
+    styled_df = metrics_df.style.format("{:.2%}").set_table_styles(DF_STYLE)
+    if add_bar:
+        return styled_df.bar(color=["#d65f5f", "#5fba7d"], align="zero")
+    else:
+        return styled_df
 
 
 def cross_validate(
@@ -892,6 +897,10 @@ def neutralize(
 
 
 def validation_metrics(validation_data, pred_cols, target_col=TARGET_COL):
+    """Compute validation metrics for a set of predictions.
+
+    :returns: DataFrame with metrics for each prediction column.
+    """
     validation_stats = pd.DataFrame()
     for pred_col in pred_cols:
         # Check the per-era correlations on the validation set (out of sample)
@@ -979,3 +988,197 @@ def time_series_split(df, n_splits, embargo=12):
             indices[row_era.isin(uniq_era[:test_start])],  # type: ignore
             indices[row_era.isin(test_eras)],  # type: ignore
         )
+
+
+########################################################################################
+# PLOTTING TOOLS
+########################################################################################
+
+
+def refmt_predcols(cols):
+    return [refmt_predcol(c) for c in cols]
+
+
+def refmt_predcol(col):
+    """Use regex to extract col name
+    pred_target_arthur_v4_20_cv1 -> arthur_v4_20"""
+    if "cv" in col:
+        return re.search(r"pred_target_(\w+)_cv", col).group(1)
+    else:
+        return re.search(r"pred_target_(\w+)", col).group(1)
+
+
+def compare_models_with_baseline(
+    df: DF,
+    predcols: list[str],
+    baseline_col: str,
+    target_col: str,
+    plot_erabinsz: int = 200,
+) -> Tuple[Any, pd.DataFrame]:
+    """Provides erawise summary plots describing how good predcols are against
+    baseline_col. Also provides a summary table.
+
+    Given a df with predcols and a baseline predcol, plots the erawise correlation
+    for each of predcol and the baseline col. Also plots the absolute improvement
+    over the baseline col for each of the predcols.
+
+    In the summary dataframe, the columns are:
+    - model
+    - corr2
+    - sharpe
+    - Δcorr2%
+    - Δsharpe%
+    - #eras_better
+    - #percent_eras_better
+    - worst_corr_era / baseline_worst_corr_era'
+
+    :param df: A dataframe containing era, predcols+baseline_col and target.
+    """
+    # Compute erawise correlation for each predcol and the baseline col
+    era_mdl_corrs = [
+        df.groupby(ERA_COL).apply(lambda d: numerai_corr2(d[predcol], d[target_col]))
+        for predcol in predcols
+    ]
+    # models, predcols corrs
+    era_mdl_corr_df = pd.concat(era_mdl_corrs, axis=1)
+    era_mdl_corr_df.columns = predcols
+    bl_era_corr = df.groupby(ERA_COL).apply(
+        lambda d: numerai_corr2(d[baseline_col], d[target_col])
+    )
+    # Compute the absolute improvement ove baseline.
+    blc_rescaled = (bl_era_corr + 1.0) / 2.0
+    mc_rescaled_df = (era_mdl_corr_df + 1.0) / 2.0
+    improvement_df = mc_rescaled_df.sub(blc_rescaled, axis=0)
+    fig = _plot_era_improvment(improvement_df, erabinsz=plot_erabinsz)
+    ###########
+    return (
+        fig,
+        _build_comparison_summary(
+            era_models_corr_df=era_mdl_corr_df,
+            baseline_era_corr=bl_era_corr,
+            baseline_col=baseline_col,
+        ),
+    )
+
+
+def _plot_era_improvment(improvement_df: pd.DataFrame, erabinsz: int) -> Any:
+    """Plots the abs improvement over the baseline col for each predcol with
+    seaborn or ploty.
+
+    :param improvement_df: A df where the rows are eras and the columns are the
+        percentage improvement in corr vs the baseline col.
+    :param w_plotly: If True, plots with plotly, else with matplotlib.
+    """
+    params = dict(
+        title="Δcorr2 = corr_model - corr_baseline",
+        xlabel="Eras",
+        ylabel="Δcorr2",
+        erabinsz=erabinsz,
+    )
+    _plot_era_improvment_w_sns(improvement_df, **params)
+
+
+def _plot_era_improvment_w_sns(
+    improvement_df: pd.DataFrame,
+    title: str,
+    xlabel: str,
+    ylabel: str,
+    erabinsz: int = 200,
+) -> Any:
+    fig, axes = plt.subplots(
+        2, len(improvement_df.columns) // 2, figsize=(18, 8), sharey=True
+    )
+    better_df = pct_better_by_erabin(improvement_df, binsz=erabinsz)
+    # Times 1.1 to give the plot some breathing space
+    ymin = [improvement_df.min().min() * 1.2] * 2
+    ymax = [improvement_df.max().max() * 1.2] * 2
+    colors = plt.cm.rainbow(np.linspace(0, 1, better_df.shape[0]))
+    for ax, col in zip(axes.flat, improvement_df.columns):
+        # Scatter plot the percentage improvement over baseline
+        sns.scatterplot(data=improvement_df[col], ax=ax)
+        ax.set_ylabel(ylabel)
+        ax.set_xlabel(xlabel)
+        # Flood fill regions and show how often the combined is better than baseline
+        for i, bn in enumerate(better_df.index):
+            ax.fill_between(
+                x=[bn.left, bn.right], y1=ymin, y2=ymax, alpha=0.15, color=colors[i]
+            )
+            ax.annotate(
+                f"%eras better\n{better_df.loc[bn, col]:.0f}%",
+                xy=[bn.left, ymin[0] * 0.9],
+            )
+        # Compute how many eras better than baseline
+        pct_above = (improvement_df[col] > 0).mean()
+        ax.set_title(col + f"\nPercent of eras better: {pct_above:.0%}")
+        ax.hlines(
+            y=0,
+            xmin=improvement_df.index.min(),
+            xmax=improvement_df.index.max(),
+            color="r",
+        )
+    plt.suptitle(title)
+    plt.tight_layout()
+    return fig
+
+
+def _build_comparison_summary(
+    era_models_corr_df: pd.DataFrame, baseline_era_corr: pd.Series, baseline_col: str
+) -> pd.DataFrame:
+    """Builds a summary dataframe comparing the erawise correlation of each model
+    against the baseline model.
+
+    :param era_cmp_corr_df: A dataframe containing the erawise correlation of each
+        model.
+    :param baseline_era_corr: A series containing the erawise correlation of the
+        baseline model.
+    :returns: A dataframe containing the summary statistics as described in
+        :func:`compare_predcols_with_baseline`.
+    """
+    # Number of eras better than baseline
+    num_eras_better = era_models_corr_df.gt(baseline_era_corr, axis=0).sum(axis=0)
+    pct_eras_better = num_eras_better / era_models_corr_df.shape[0] * 100.0
+    # Compute the ratio of the worst correlation of models vs baseline
+    worst_corr_ratio = (era_models_corr_df.min(axis=0) + 1) / (
+        baseline_era_corr.min() + 1
+    )
+    # Compute mean corr and sharpe for the models and baseline
+    mdl_mean_corr = era_models_corr_df.mean(axis=0)
+    mdl_sharpe = mdl_mean_corr / era_models_corr_df.std(axis=0, ddof=0)
+    bl_mean_corr = baseline_era_corr.mean()
+    bl_sharpe = bl_mean_corr / baseline_era_corr.std(ddof=0)
+    # Compute the percentage improvement of corr and sharpe over the baseline col for
+    # each predcol
+    pct_imp_corr = (mdl_mean_corr - bl_mean_corr) / bl_mean_corr * 100.0
+    pct_imp_sharpe = (mdl_sharpe - bl_sharpe) / bl_sharpe * 100.0
+    # Build the summary dataframe
+    summary_df = pd.DataFrame(
+        {
+            "model": (
+                [baseline_col] + refmt_predcols(era_models_corr_df.columns.to_list())
+            ),
+            "corr2": [bl_mean_corr] + mdl_mean_corr.to_list(),
+            "sharpe": [bl_sharpe] + mdl_sharpe.to_list(),
+            "Δcorr2%": [0.0] + pct_imp_corr.to_list(),
+            "Δsharpe%": [0.0] + pct_imp_sharpe.to_list(),
+            "#eras_better": [0] + num_eras_better.to_list(),
+            "#percent_eras_better": [0.0] + pct_eras_better.to_list(),
+            "worst_corr_era / baseline_worst (< 0 better)": (
+                [1.0] + worst_corr_ratio.to_list()
+            ),
+        }
+    )
+    return summary_df.set_index("model")
+
+
+def pct_better_by_erabin(improvement_df, binsz=200):
+    """Group eras into bins of size of binsz and compute what fraction of eras in each
+    bin are better than the baseline col.
+    """
+    # Don't mutate
+    pi_df = improvement_df.copy()
+    min_era, max_era = pi_df.index.min(), pi_df.index.max()
+    bins = np.arange(min_era, max_era + binsz, binsz)
+    pi_df["era_bin"] = pd.cut(pi_df.index, bins=bins)
+    pi_df[pi_df.columns[:-1]] = pi_df[pi_df.columns[:-1]] > 0.0
+    better_df = pi_df.groupby("era_bin").mean() * 100.0
+    return better_df
