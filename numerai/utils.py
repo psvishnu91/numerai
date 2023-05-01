@@ -1001,11 +1001,11 @@ def refmt_predcols(cols):
 
 def refmt_predcol(col):
     """Use regex to extract col name
-    pred_target_arthur_v4_20_cv1 -> arthur_v4_20"""
+    pred_target_arthur_v4_20_wt0.3_cv1 -> arthur_v4_20_wt0.3"""
     if "cv" in col:
         return re.search(r"pred_target_(\w+)_cv", col).group(1)
     else:
-        return re.search(r"pred_target_(\w+)", col).group(1)
+        return re.search(r"pred_target_(.*)", col).group(1)
 
 
 def compare_models_with_baseline(
