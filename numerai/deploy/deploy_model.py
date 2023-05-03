@@ -49,14 +49,14 @@ def predict_ensemble(
         df[pred_col] = model.predict(df[features])
         pred_cols.append(pred_col)
     ensemble_col = "pred_ensemble"
-    logger.info(f"Ensembling predictions with {ensembling_fn}: {pred_cols}")
+    logger.info(f"Ensembling predictions with {ensembling_fn.__name__}(): {pred_cols}")
     df[ensemble_col] = ensembling_fn(df[pred_cols], axis=1)
     if neutralisation_cols is None:
-        return df[ensemble_col].values
-    ntr_cols = features if neutralisation_cols == "all" else neutralisation_cols
-    logger.info("Neutralising the predictions and taking the rank percent")
-    return (
-        neutralize(
+        pred = df[[ensemble_col]]
+    else:
+        ntr_cols = features if neutralisation_cols == "all" else neutralisation_cols
+        logger.info("Neutralising the predictions")
+        pred = neutralize(
             df=df,
             columns=[ensemble_col],
             neutralizers=ntr_cols,
@@ -65,9 +65,8 @@ def predict_ensemble(
             era_col="era",
             verbose=True,
         )
-        .rank(pct=True)
-        .rename(columns={ensemble_col: "prediction"})
-    )
+    logger.info("Taking the rank percent")
+    return pred.rank(pct=True).rename(columns={ensemble_col: "prediction"})
 
 
 def neutralize(
@@ -104,3 +103,24 @@ def neutralize(
         scores /= scores.std(ddof=0)
         computed.append(scores)
     return pd.DataFrame(np.concatenate(computed), columns=columns, index=df.index)
+
+
+########################################################################################
+# Specific models
+########################################################################################
+
+#--------------------------------------------------------------------------------------#
+# ARGENTINA
+#--------------------------------------------------------------------------------------#
+
+def argentina_ensemble(df, cyrus_wt=0.7, **kwargs):
+    """Given a dataframe with predictions from cyrus and non-cyrus models,
+    averages predictions of cyrus and non-cyrus models separately and combines
+    them as a weighted sum.
+    """
+    cyrus_cols = [c for c in df.columns if 'cyrus' in c]
+    non_cyrus_cols = [c for c in df.columns if 'cyrus' not in c]
+    return (
+        (df[cyrus_cols].mean(axis=1) * cyrus_wt)
+        + (df[non_cyrus_cols].mean(axis=1) * (1-cyrus_wt))
+    )   

@@ -6,7 +6,7 @@ use the int8 features.
 
 Usage::
 
-    python predict.py --model-name=<model_name> --dryrun
+    python predict.py --model-name=<model_name> --model-id=<model_id> --dryrun
 
 Supported models:
 1. `nomi_v4_20`
@@ -21,6 +21,8 @@ import pickle
 import sys
 import numerapi
 import pandas as pd
+# HACK: import all the functions from deploy_model.py
+from deploy_model import *
 
 file_handler = logging.FileHandler(filename="predict.log")
 stdout_handler = logging.StreamHandler(stream=sys.stdout)
@@ -60,7 +62,7 @@ def main():
     if opts.dryrun:
         logger.info("Dry run, not uploading predictions")
     else:
-        submit(predictions=predictions, model_id=os.getenv("MODEL_ID"))
+        submit(predictions=predictions, model_id=opts.model_id)
 
 
 def _parse_opts():
@@ -69,6 +71,12 @@ def _parse_opts():
         "--model-name",
         type=str,
         help="Model name to use for predictions",
+        required=True,
+    )
+    parser.add_argument(
+        "--model-id",
+        type=str,
+        help="Model id. Get this from the numer.ai models page.",
         required=True,
     )
     parser.add_argument(

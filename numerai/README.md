@@ -6,6 +6,14 @@ virtualenv --python=python3.10 .venv && \
     pip insall -r requirments-minimal.txt && \
     pip freeze > deploy/requirements.txt
 ```
+## Deploying a new model
+* Use the `task6-create-deploy-models.ipynb` notebook to create and pickle the new model.
+* The pickled model needs to be saved under `models/` dir. Upload it to
+  `s3://numerai-v1/deployed_models/` for posterity.
+* The following command should run
+  `predict_script.predict(napi=napi, wrapped_model=new_model)` and return
+  a dataframe with one column `prediction` which has a ranked pct output.
+* Update `predict.sh` to run `predict.py` once more for your new model.
 
 # Streaming logs from remote m/c
 ``` bash
