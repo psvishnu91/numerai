@@ -224,9 +224,10 @@ def download_s3_file(
 
     download_s3_file(
         s3_path="s3://bucket/prefix/file",
-        local_path="/path/to/file",
+        local_path="/path/to/dir/",
         aws_credential_fl="~/.aws/credentials",
     )
+    :param local_file:
     """
     # download s3_path to local_path
     boto_session = build_boto_session(
@@ -236,7 +237,10 @@ def download_s3_file(
     bucket = urllib.parse.urlparse(s3_path).netloc
     s3_key = urllib.parse.urlparse(s3_path).path.lstrip("/")
     s3_fl = f"s3://{bucket}/{s3_key}"
-    local_fl = os.path.join(local_path, os.path.basename(s3_key))
+    if os.path.isdir(local_path):
+        local_fl = os.path.join(local_path, os.path.basename(s3_key))
+    else:
+        local_fl = local_path
     if dry_run:
         log.info(f"[DRYRUN] Would download {s3_fl} to {local_fl}")
     elif os.path.exists(local_fl) and not overwrite:
@@ -1010,10 +1014,12 @@ def refmt_predcol(col):
 
 def compare_models_with_baseline(
     df: DF,
-    predcols: list[str],
+    predcols: List[str],
     baseline_col: str,
     target_col: str,
     plot_erabinsz: int = 200,
+    to_refmt_predcols: bool = True,
+    figsize=(18, 8),
 ) -> Tuple[Any, pd.DataFrame]:
     """Provides erawise summary plots describing how good predcols are against
     baseline_col. Also provides a summary table.
@@ -1049,7 +1055,7 @@ def compare_models_with_baseline(
     blc_rescaled = (bl_era_corr + 1.0) / 2.0
     mc_rescaled_df = (era_mdl_corr_df + 1.0) / 2.0
     improvement_df = mc_rescaled_df.sub(blc_rescaled, axis=0)
-    fig = _plot_era_improvment(improvement_df, erabinsz=plot_erabinsz)
+    fig = _plot_era_improvment(improvement_df, erabinsz=plot_erabinsz, figsize=figsize)
     ###########
     return (
         fig,
@@ -1057,11 +1063,14 @@ def compare_models_with_baseline(
             era_models_corr_df=era_mdl_corr_df,
             baseline_era_corr=bl_era_corr,
             baseline_col=baseline_col,
+            to_refmt_predcols=to_refmt_predcols,
         ),
     )
 
 
-def _plot_era_improvment(improvement_df: pd.DataFrame, erabinsz: int) -> Any:
+def _plot_era_improvment(
+    improvement_df: pd.DataFrame, erabinsz: int, figsize=(18, 8)
+) -> Any:
     """Plots the abs improvement over the baseline col for each predcol with
     seaborn or ploty.
 
@@ -1069,13 +1078,14 @@ def _plot_era_improvment(improvement_df: pd.DataFrame, erabinsz: int) -> Any:
         percentage improvement in corr vs the baseline col.
     :param w_plotly: If True, plots with plotly, else with matplotlib.
     """
-    params = dict(
+    _plot_era_improvment_w_sns(
+        improvement_df,
         title="Δcorr2 = corr_model - corr_baseline",
         xlabel="Eras",
         ylabel="Δcorr2",
         erabinsz=erabinsz,
+        figsize=figsize,
     )
-    _plot_era_improvment_w_sns(improvement_df, **params)
 
 
 def _plot_era_improvment_w_sns(
@@ -1084,9 +1094,10 @@ def _plot_era_improvment_w_sns(
     xlabel: str,
     ylabel: str,
     erabinsz: int = 200,
+    figsize=(18, 8),
 ) -> Any:
     fig, axes = plt.subplots(
-        2, len(improvement_df.columns) // 2, figsize=(18, 8), sharey=True
+        2, len(improvement_df.columns) // 2, figsize=figsize, sharey=True
     )
     better_df = pct_better_by_erabin(improvement_df, binsz=erabinsz)
     # Times 1.1 to give the plot some breathing space
@@ -1122,7 +1133,10 @@ def _plot_era_improvment_w_sns(
 
 
 def _build_comparison_summary(
-    era_models_corr_df: pd.DataFrame, baseline_era_corr: pd.Series, baseline_col: str
+    era_models_corr_df: pd.DataFrame,
+    baseline_era_corr: pd.Series,
+    baseline_col: str,
+    to_refmt_predcols: bool = True,
 ) -> pd.DataFrame:
     """Builds a summary dataframe comparing the erawise correlation of each model
     against the baseline model.
@@ -1151,11 +1165,13 @@ def _build_comparison_summary(
     pct_imp_corr = (mdl_mean_corr - bl_mean_corr) / bl_mean_corr * 100.0
     pct_imp_sharpe = (mdl_sharpe - bl_sharpe) / bl_sharpe * 100.0
     # Build the summary dataframe
+    if to_refmt_predcols:
+        fmtd_predcols = refmt_predcols(era_models_corr_df.columns.to_list())
+    else:
+        fmtd_predcols = era_models_corr_df.columns.to_list()
     summary_df = pd.DataFrame(
         {
-            "model": (
-                [baseline_col] + refmt_predcols(era_models_corr_df.columns.to_list())
-            ),
+            "model": ([baseline_col] + fmtd_predcols),
             "corr2": [bl_mean_corr] + mdl_mean_corr.to_list(),
             "sharpe": [bl_sharpe] + mdl_sharpe.to_list(),
             "Δcorr2%": [0.0] + pct_imp_corr.to_list(),
@@ -1182,3 +1198,58 @@ def pct_better_by_erabin(improvement_df, binsz=200):
     pi_df[pi_df.columns[:-1]] = pi_df[pi_df.columns[:-1]] > 0.0
     better_df = pi_df.groupby("era_bin").mean() * 100.0
     return better_df
+
+
+def plot_erafill(
+    bin_annot_map,
+    ax=None,
+    ymin=0,
+    ymax=1,
+    y_annotation=0.5,
+    add_era_annotation=False,
+    figsize=(8, 3),
+    xpos="left",
+    fontsize=15,
+    **fill_kwargs,
+):
+    """Plots erabins and annotations in floodfill format.
+
+    :param bin_annot_map: A dictionary mapping erabins to annotations
+        bin_map = {(min_era, max_era): "<annotation>"}.
+    :param ax: The matplotlib axis to plot on. If None, a new figure is created.
+    :param ymin: The minimum y value of the floodfill.
+    :param ymax: The maximum y value of the floodfill.
+    :param y_annotation: The y value of the annotation.
+    :param add_era_annotation: Whether to add the era range to the annotation.
+    :param figsize: The size of the figure to create if `ax` is None.
+    :param xpos: where should we annotate, `left` or `center`
+    :param fontsize: The fontsize of the annotation.
+    :param fill_kwargs: Additional kwargs to pass to `ax.fill_between`.
+
+    :returns: The matplotlib axis.
+
+    Usage::
+
+        bin_annot_map = {(1, 500): "train", (500,800): "val", (800, 1100): "test"}
+        plot_erafill(bin_annot_map, xpos="center", alpha=0.5)  # we overwite alpha
+    """
+    if ax is None:
+        _, ax = plt.subplots(1, 1, figsize=figsize)
+    colors = plt.cm.tab20c(np.linspace(0, 1, len(bin_annot_map)))
+    ymin_list = [ymin] * 2
+    ymax_list = [ymax] * 2
+    for i, (bn, annot) in enumerate(bin_annot_map.items()):
+        kwargs = {"alpha": 0.15, **fill_kwargs}
+        ax.fill_between(
+            x=bn,
+            y1=ymin_list,  # type: ignore
+            y2=ymax_list,  # type: ignore
+            color=colors[i],
+            **kwargs,
+        )
+        annot_x = bn[0] if xpos == "left" else bn[0] + (bn[1] - bn[0]) * 0.4
+        _annot = f"{annot}\nEra:{bn}" if add_era_annotation else annot
+        ax.annotate(f"{_annot}", xy=[annot_x, y_annotation], fontsize=fontsize)
+    ax.set_xlabel("Eras", fontsize=fontsize)
+    ax.set_xlim(0, max(bn[1] for bn in bin_annot_map))
+    return ax
