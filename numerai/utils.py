@@ -1332,7 +1332,7 @@ def plot_erafill(
 
 def plot_cv_split(
     cv_splits,
-    era_col=ERA_COL,
+    xlabel="Eras",
     linewidth=9,
     always_show_bin_ends=False,
     bin_end_offset=75,
@@ -1342,6 +1342,9 @@ def plot_cv_split(
     ax=None,
 ):
     """Plot the train/val/test split of the eras.
+
+    See example usage in
+    https://github.com/vispz/numerai/blob/main/numerai/utils_usage_examples/plot-cv-splits-example-usage.ipynb
 
     Output for the sample input: https://gcdnb.pbrd.co/images/3WsfRGOsLJZ0.png?o=1
 
@@ -1422,7 +1425,7 @@ def plot_cv_split(
     ax.set(
         yticks=np.arange(n_splits) + 0.5,
         yticklabels=yticklabels,
-        xlabel=era_col,
+        xlabel=xlabel,
         ylabel="CV iteration",
         ylim=[n_splits + 0.2, -0.2],
         xlim=[xmin - x_range * 0.1, xmax + x_range * 0.1],
