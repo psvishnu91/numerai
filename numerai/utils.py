@@ -1064,11 +1064,11 @@ def compare_models_with_baseline(
     Example usage::
 
         df = pd.DataFrame({
-            "era": ["era1", "era1", "era2", "era2", "era3", "era3"],
-            "pred_target_mdl1": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
-            "pred_target_mdl2": [0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
-            "pred_target_baseline": [0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-            "target": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+            "era": ["era1", "era1", "era2", "era2", "era3", "era3", "era4", "era4"],
+            "pred_target_mdl1": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+            "pred_target_mdl2": [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+            "pred_target_baseline": [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1],
+            "target": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 0.1, 0.2],
         })
         fig, summary_df = compare_models_with_baseline(
             df,
@@ -1344,7 +1344,7 @@ def plot_cv_split(
     """Plot the train/val/test split of the eras.
 
     See example usage in
-    https://github.com/vispz/numerai/blob/main/numerai/utils_usage_examples/plot-cv-splits-example-usage.ipynb
+    https://github.com/vispz/numerai/blob/main/numerai/utils_usage_examples/plotting-example.ipynb
 
     Output for the sample input: https://gcdnb.pbrd.co/images/3WsfRGOsLJZ0.png?o=1
 
