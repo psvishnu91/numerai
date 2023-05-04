@@ -33,6 +33,11 @@ from tqdm.notebook import tqdm
 
 import mlflow
 
+
+########################################################################################
+
+sns.set_theme(palette="muted", font_scale=1.2)
+
 ERA_COL = "era"
 TARGET_COL = "target_cyrus_v4_20"
 DATA_TYPE_COL = "data_type"
@@ -72,6 +77,7 @@ DF_STYLE = [
     # header cell properties
     dict(selector="th", props=[("font-size", "100%"), ("text-align", "center")]),
 ]
+
 ########################################################################################
 # Logging defaults utisl
 ########################################################################################
@@ -1324,10 +1330,25 @@ def plot_erafill(
     return ax
 
 
-def plot_cv_split(cv_splits, era_col=ERA_COL, linewidth=9):
+def plot_cv_split(
+    cv_splits,
+    era_col=ERA_COL,
+    linewidth=9,
+    always_show_bin_ends=False,
+    bin_end_offset=75,
+    title="Cross-Validation Splits",
+    annot_fontsize=12,
+    title_fontsize=15,
+    ax=None,
+):
     """Plot the train/val/test split of the eras.
 
     Output for the sample input: https://gcdnb.pbrd.co/images/3WsfRGOsLJZ0.png?o=1
+
+    :param always_show_bin_ends: Whether to always show the bin end annotations.
+        If False, we only show bin end for the last split in a cv-split.
+    :param bin_end_offset: Since bin_end and bin_st of subsequent splits can overlap,
+        we move the bin_end annotation back by this amount.
 
     Sample input::
 
@@ -1354,8 +1375,10 @@ def plot_cv_split(cv_splits, era_col=ERA_COL, linewidth=9):
     ]
     """
     cmap_cv = plt.cm.coolwarm
+
     n_splits = len(cv_splits)
-    fig, ax = plt.subplots()
+    if ax is None:
+        fig, ax = plt.subplots()
     # For each cv split
     xmin = min(bin_st for cvs in cv_splits for bin_st, _ in cvs.values())
     xmax = max(bin_end for cvs in cv_splits for _, bin_end in cvs.values())
@@ -1373,13 +1396,15 @@ def plot_cv_split(cv_splits, era_col=ERA_COL, linewidth=9):
             ax.annotate(
                 label,
                 xy=[bin_st, i + 0.8],
-                fontsize=12,
+                fontsize=annot_fontsize,
             )
             # annotate bin start
             ax.annotate(str(bin_st), xy=[bin_st, i + 0.3], fontsize=12)
-            if j == len(ith_cv_split) - 1:
+            if always_show_bin_ends or j == len(ith_cv_split) - 1:
                 # annotate bin end only for the last label
-                ax.annotate(str(bin_end), xy=[bin_end, i + 0.3], fontsize=12)
+                ax.annotate(
+                    str(bin_end), xy=[bin_end - bin_end_offset, i + 0.3], fontsize=12
+                )
         # Draw the lines
         ax.scatter(
             range(len(indices)),
@@ -1401,6 +1426,6 @@ def plot_cv_split(cv_splits, era_col=ERA_COL, linewidth=9):
         ylabel="CV iteration",
         ylim=[n_splits + 0.2, -0.2],
         xlim=[xmin - x_range * 0.1, xmax + x_range * 0.1],
-        title="Cross-Validation Splits",
     )
+    ax.set_title(title, fontsize=title_fontsize)
     return ax
