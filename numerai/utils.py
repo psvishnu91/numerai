@@ -1028,6 +1028,8 @@ def compare_models_with_baseline(
     """Provides erawise summary plots describing how good competitor_predcols are
     against baseline_col. Also provides a summary table.
 
+    Example output: https://gcdnb.pbrd.co/images/SXxbqHBIZRdS.png?o=1
+
     Given a df with competitor_predcols and a baseline predcol, plots the erawise
     correlation for each of predcol and the baseline col. Also plots the absolute
     improvement over the baseline col for each of the competitor_predcols.
@@ -1071,6 +1073,9 @@ def compare_models_with_baseline(
             plot_erabinsz=2,
             to_refmt_predcols=False,
             era_col="era",
+        )
+        fmt_metrics_df(
+            summary_df[["corr2", "sharpe", "corr2_prop_increase", "sharpe_prop_increase"]]
         )
     """
     # Compute erawise correlation for each predcol and the baseline col
