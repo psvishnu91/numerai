@@ -1322,3 +1322,85 @@ def plot_erafill(
     ax.set_xlabel("Eras", fontsize=fontsize)
     ax.set_xlim(0, max(bn[1] for bn in bin_annot_map))
     return ax
+
+
+def plot_cv_split(cv_splits, era_col=ERA_COL, linewidth=9):
+    """Plot the train/val/test split of the eras.
+
+    Output for the sample input: https://gcdnb.pbrd.co/images/3WsfRGOsLJZ0.png?o=1
+
+    Sample input::
+
+        cv_splits = [
+            # cv 0
+            {
+                # label: era range
+                "train": (1, 700),
+                "validation": (721, 900),
+                "test": (921, 1100),
+            },
+            # cv 1
+            {
+                "train": (1, 400),
+                "validation": (421, 600),
+                "test": (621, 800),
+            },
+            # cv 2
+            {
+                "train": (1, 200),
+                "validation": (221, 401),
+                "test": (421, 601),
+            },
+    ]
+    """
+    cmap_cv = plt.cm.coolwarm
+    n_splits = len(cv_splits)
+    fig, ax = plt.subplots()
+    # For each cv split
+    xmin = min(bin_st for cvs in cv_splits for bin_st, _ in cvs.values())
+    xmax = max(bin_end for cvs in cv_splits for _, bin_end in cvs.values())
+    for i, ith_cv_split in enumerate(cv_splits):
+        # Fill in indices with the training/test groups
+        min_era = min(bin_st for bin_st, _ in ith_cv_split.values())
+        max_era = max(bin_end for _, bin_end in ith_cv_split.values())
+        indices = np.array([np.nan] * (max_era - min_era + 1))
+        # For each split within a cv, ex: train, val, test
+        for j, (label, (bin_st, bin_end)) in enumerate(
+            sorted(ith_cv_split.items(), key=lambda kv: kv[1])
+        ):
+            indices[bin_st - min_era : bin_end - min_era] = j
+            # annotate bin label
+            ax.annotate(
+                label,
+                xy=[bin_st, i + 0.8],
+                fontsize=12,
+            )
+            # annotate bin start
+            ax.annotate(str(bin_st), xy=[bin_st, i + 0.3], fontsize=12)
+            if j == len(ith_cv_split) - 1:
+                # annotate bin end only for the last label
+                ax.annotate(str(bin_end), xy=[bin_end, i + 0.3], fontsize=12)
+        # Draw the lines
+        ax.scatter(
+            range(len(indices)),
+            [i + 0.5] * len(indices),
+            c=indices,
+            marker="_",
+            lw=linewidth,
+            cmap=cmap_cv,
+            vmin=-0.2,
+            vmax=1.2,
+        )
+
+    yticklabels = list(range(n_splits))
+    x_range = xmax - xmin
+    ax.set(
+        yticks=np.arange(n_splits) + 0.5,
+        yticklabels=yticklabels,
+        xlabel=era_col,
+        ylabel="CV iteration",
+        ylim=[n_splits + 0.2, -0.2],
+        xlim=[xmin - x_range * 0.1, xmax + x_range * 0.1],
+        title="Cross-Validation Splits",
+    )
+    return ax
