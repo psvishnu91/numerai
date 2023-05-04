@@ -11,6 +11,7 @@ import pickle
 import re
 import tempfile
 import time
+import typing
 import urllib
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -1014,49 +1015,89 @@ def refmt_predcol(col):
 
 def compare_models_with_baseline(
     df: DF,
-    predcols: List[str],
+    competitor_predcols: List[str],
     baseline_col: str,
     target_col: str,
+    to_plot: bool = True,
     plot_erabinsz: int = 200,
-    to_refmt_predcols: bool = True,
+    to_refmt_predcols: bool = False,
     figsize=(18, 8),
+    era_col: str = ERA_COL,
+    include_legend: bool = True,
 ) -> Tuple[Any, pd.DataFrame]:
-    """Provides erawise summary plots describing how good predcols are against
-    baseline_col. Also provides a summary table.
+    """Provides erawise summary plots describing how good competitor_predcols are
+    against baseline_col. Also provides a summary table.
 
-    Given a df with predcols and a baseline predcol, plots the erawise correlation
-    for each of predcol and the baseline col. Also plots the absolute improvement
-    over the baseline col for each of the predcols.
+    Given a df with competitor_predcols and a baseline predcol, plots the erawise
+    correlation for each of predcol and the baseline col. Also plots the absolute
+    improvement over the baseline col for each of the competitor_predcols.
 
     In the summary dataframe, the columns are:
     - model
     - corr2
     - sharpe
-    - Δcorr2%
-    - Δsharpe%
+    - corr2_prop_increase
+    - sharpe_prop_increase
     - #eras_better
-    - #percent_eras_better
-    - worst_corr_era / baseline_worst_corr_era'
+    - #eras_better_proportion
+    - worst_corr_era / baseline_worst (< 0 better)
 
     :param df: A dataframe containing era, predcols+baseline_col and target.
+    :param competitor_predcols: A list of predcols to compare against baseline_col.
+    :param baseline_col: The baseline predcol to compare against.
+    :param target_col: The target column, ex: `target_cyrus_v4_20`.
+    :param to_plot: Whether to plot the erawise correlation and improvement plots.
+    :param plot_erabinsz: The number of eras to bin together for the plots.
+    :param to_refmt_predcols: Whether to reformat the predcols using regex.
+    :param figsize: The figsize for the plots.
+
+    :return: A tuple of (fig, summary_df).
+
+    Example usage::
+
+        df = pd.DataFrame({
+            "era": ["era1", "era1", "era2", "era2", "era3", "era3"],
+            "pred_target_mdl1": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+            "pred_target_mdl2": [0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            "pred_target_baseline": [0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+            "target": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+        })
+        fig, summary_df = compare_models_with_baseline(
+            df,
+            competitor_predcols=["pred_target_mdl1", "pred_target_mdl2"],
+            baseline_col="pred_target_baseline",
+            target_col="target",
+            to_plot=True,
+            plot_erabinsz=2,
+            to_refmt_predcols=False,
+            era_col="era",
+        )
     """
     # Compute erawise correlation for each predcol and the baseline col
     era_mdl_corrs = [
-        df.groupby(ERA_COL).apply(lambda d: numerai_corr2(d[predcol], d[target_col]))
-        for predcol in predcols
+        df.groupby(era_col).apply(lambda d: numerai_corr2(d[predcol], d[target_col]))
+        for predcol in competitor_predcols
     ]
-    # models, predcols corrs
+    # models, competitor_predcols corrs
     era_mdl_corr_df = pd.concat(era_mdl_corrs, axis=1)
-    era_mdl_corr_df.columns = predcols
-    bl_era_corr = df.groupby(ERA_COL).apply(
+    era_mdl_corr_df.columns = competitor_predcols
+    bl_era_corr = df.groupby(era_col).apply(
         lambda d: numerai_corr2(d[baseline_col], d[target_col])
     )
     # Compute the absolute improvement ove baseline.
     blc_rescaled = (bl_era_corr + 1.0) / 2.0
     mc_rescaled_df = (era_mdl_corr_df + 1.0) / 2.0
     improvement_df = mc_rescaled_df.sub(blc_rescaled, axis=0)
-    fig = _plot_era_improvment(improvement_df, erabinsz=plot_erabinsz, figsize=figsize)
-    ###########
+    if to_plot:
+        fig = _plot_era_improvment(
+            improvement_df,
+            erabinsz=plot_erabinsz,
+            figsize=figsize,
+            era_col=era_col,
+            include_legend=include_legend,
+        )
+    else:
+        fig = None
     return (
         fig,
         _build_comparison_summary(
@@ -1068,8 +1109,20 @@ def compare_models_with_baseline(
     )
 
 
+@typing.no_type_check
 def _plot_era_improvment(
-    improvement_df: pd.DataFrame, erabinsz: int, figsize=(18, 8)
+    improvement_df: pd.DataFrame,
+    era_col: str = ERA_COL,
+    title: str = "Δcorr2 = corr_model - corr_baseline",
+    xlabel: str = "Eras",
+    ylabel: str = "Δcorr2",
+    erabinsz: int = 200,
+    figsize=(18, 8),
+    axes_fontsize=16,
+    annot_fontsize=16,
+    title_fontsize=16,
+    suptitle_fontsize=20,
+    include_legend=True,
 ) -> Any:
     """Plots the abs improvement over the baseline col for each predcol with
     seaborn or ploty.
@@ -1078,56 +1131,67 @@ def _plot_era_improvment(
         percentage improvement in corr vs the baseline col.
     :param w_plotly: If True, plots with plotly, else with matplotlib.
     """
-    _plot_era_improvment_w_sns(
-        improvement_df,
-        title="Δcorr2 = corr_model - corr_baseline",
-        xlabel="Eras",
-        ylabel="Δcorr2",
-        erabinsz=erabinsz,
-        figsize=figsize,
-    )
-
-
-def _plot_era_improvment_w_sns(
-    improvement_df: pd.DataFrame,
-    title: str,
-    xlabel: str,
-    ylabel: str,
-    erabinsz: int = 200,
-    figsize=(18, 8),
-) -> Any:
-    fig, axes = plt.subplots(
-        2, len(improvement_df.columns) // 2, figsize=figsize, sharey=True
-    )
-    better_df = pct_better_by_erabin(improvement_df, binsz=erabinsz)
+    num_competitors = improvement_df.shape[1]
+    # We will plot two subplots in each row unless there's just one competitor
+    n_rows = num_competitors // 2 + num_competitors % 2
+    n_cols = 2 if num_competitors > 1 else 1
+    fig, _axes = plt.subplots(n_rows, n_cols, figsize=figsize, sharey=True)
+    axes = _axes.flatten() if num_competitors > 1 else [_axes]
+    better_df = pct_better_by_erabin(improvement_df, binsz=erabinsz, era_col=era_col)
     # Times 1.1 to give the plot some breathing space
-    ymin = [improvement_df.min().min() * 1.2] * 2
-    ymax = [improvement_df.max().max() * 1.2] * 2
+    ymin = [improvement_df.min().min() * 1.3] * 2
+    ymax = [improvement_df.max().max() * 1.3] * 2
     colors = plt.cm.rainbow(np.linspace(0, 1, better_df.shape[0]))
-    for ax, col in zip(axes.flat, improvement_df.columns):
+    for ax, col in zip(axes, improvement_df.columns):
+        ax2 = ax.twinx()
         # Scatter plot the percentage improvement over baseline
-        sns.scatterplot(data=improvement_df[col], ax=ax)
-        ax.set_ylabel(ylabel)
-        ax.set_xlabel(xlabel)
+        sns.scatterplot(data=improvement_df[col], ax=ax, label="_nolegend_")
+        ax.set_ylabel(ylabel, fontsize=axes_fontsize)
+        ax.set_xlabel(xlabel, fontsize=axes_fontsize)
+        # Plot a line plot of percentage columns better than baseline in each era bin
+        sns.lineplot(
+            x=[bn.mid for bn in better_df.index],
+            y=better_df[col],
+            ax=ax2,
+            color="k",
+        )
+        ax2.set_ylabel(f"% {era_col.lower()} better", fontsize=axes_fontsize)
+        ax2.set_ylim([0, better_df.max().max() * 1.2])
         # Flood fill regions and show how often the combined is better than baseline
         for i, bn in enumerate(better_df.index):
             ax.fill_between(
-                x=[bn.left, bn.right], y1=ymin, y2=ymax, alpha=0.15, color=colors[i]
+                x=[bn.left, bn.right],
+                y1=ymin,
+                y2=ymax,
+                alpha=0.15,
+                color=colors[i],
+                label="_nolegend_",  # Don't show in legend
             )
             ax.annotate(
-                f"%eras better\n{better_df.loc[bn, col]:.0f}%",
-                xy=[bn.left, ymin[0] * 0.9],
+                f"%{era_col.lower()} better\n{better_df.loc[bn, col]:.0f}%",
+                xy=[bn.left, ymin[0]],
+                fontsize=annot_fontsize,
             )
-        # Compute how many eras better than baseline
+        # Compute how many eras better than baseline in total
         pct_above = (improvement_df[col] > 0).mean()
-        ax.set_title(col + f"\nPercent of eras better: {pct_above:.0%}")
+        ax.set_title(
+            col + f"\nPercent of {era_col.lower()} better: {pct_above:.0%}",
+            fontsize=title_fontsize,
+        )
         ax.hlines(
             y=0,
             xmin=improvement_df.index.min(),
             xmax=improvement_df.index.max(),
             color="r",
+            linestyle="--",
+            label="Baseline model",
         )
-    plt.suptitle(title)
+        if include_legend:
+            ax2.legend(
+                ["%Eras better than baseline in erabin"],
+                loc="upper left",
+            )
+    plt.suptitle(title, fontsize=suptitle_fontsize)
     plt.tight_layout()
     return fig
 
@@ -1136,7 +1200,7 @@ def _build_comparison_summary(
     era_models_corr_df: pd.DataFrame,
     baseline_era_corr: pd.Series,
     baseline_col: str,
-    to_refmt_predcols: bool = True,
+    to_refmt_predcols: bool = False,
 ) -> pd.DataFrame:
     """Builds a summary dataframe comparing the erawise correlation of each model
     against the baseline model.
@@ -1150,7 +1214,7 @@ def _build_comparison_summary(
     """
     # Number of eras better than baseline
     num_eras_better = era_models_corr_df.gt(baseline_era_corr, axis=0).sum(axis=0)
-    pct_eras_better = num_eras_better / era_models_corr_df.shape[0] * 100.0
+    prop_eras_better = num_eras_better / era_models_corr_df.shape[0]
     # Compute the ratio of the worst correlation of models vs baseline
     worst_corr_ratio = (era_models_corr_df.min(axis=0) + 1) / (
         baseline_era_corr.min() + 1
@@ -1162,8 +1226,8 @@ def _build_comparison_summary(
     bl_sharpe = bl_mean_corr / baseline_era_corr.std(ddof=0)
     # Compute the percentage improvement of corr and sharpe over the baseline col for
     # each predcol
-    pct_imp_corr = (mdl_mean_corr - bl_mean_corr) / bl_mean_corr * 100.0
-    pct_imp_sharpe = (mdl_sharpe - bl_sharpe) / bl_sharpe * 100.0
+    prop_imp_corr = (mdl_mean_corr - bl_mean_corr) / bl_mean_corr
+    prop_imp_sharpe = (mdl_sharpe - bl_sharpe) / bl_sharpe
     # Build the summary dataframe
     if to_refmt_predcols:
         fmtd_predcols = refmt_predcols(era_models_corr_df.columns.to_list())
@@ -1174,10 +1238,10 @@ def _build_comparison_summary(
             "model": ([baseline_col] + fmtd_predcols),
             "corr2": [bl_mean_corr] + mdl_mean_corr.to_list(),
             "sharpe": [bl_sharpe] + mdl_sharpe.to_list(),
-            "Δcorr2%": [0.0] + pct_imp_corr.to_list(),
-            "Δsharpe%": [0.0] + pct_imp_sharpe.to_list(),
+            "corr2_prop_increase": [0.0] + prop_imp_corr.to_list(),
+            "sharpe_prop_increase": [0.0] + prop_imp_sharpe.to_list(),
             "#eras_better": [0] + num_eras_better.to_list(),
-            "#percent_eras_better": [0.0] + pct_eras_better.to_list(),
+            "#eras_better_proportion": [0.0] + prop_eras_better.to_list(),
             "worst_corr_era / baseline_worst (< 0 better)": (
                 [1.0] + worst_corr_ratio.to_list()
             ),
@@ -1186,7 +1250,7 @@ def _build_comparison_summary(
     return summary_df.set_index("model")
 
 
-def pct_better_by_erabin(improvement_df, binsz=200):
+def pct_better_by_erabin(improvement_df, binsz=200, era_col=ERA_COL):
     """Group eras into bins of size of binsz and compute what fraction of eras in each
     bin are better than the baseline col.
     """
@@ -1194,9 +1258,9 @@ def pct_better_by_erabin(improvement_df, binsz=200):
     pi_df = improvement_df.copy()
     min_era, max_era = pi_df.index.min(), pi_df.index.max()
     bins = np.arange(min_era, max_era + binsz, binsz)
-    pi_df["era_bin"] = pd.cut(pi_df.index, bins=bins)
+    pi_df[f"{era_col}_bin"] = pd.cut(pi_df.index, bins=bins)
     pi_df[pi_df.columns[:-1]] = pi_df[pi_df.columns[:-1]] > 0.0
-    better_df = pi_df.groupby("era_bin").mean() * 100.0
+    better_df = pi_df.groupby(f"{era_col}_bin").mean() * 100.0
     return better_df
 
 
