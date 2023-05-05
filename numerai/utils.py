@@ -1347,14 +1347,14 @@ def plot_cv_split(
     See example usage in
     https://github.com/vispz/numerai/blob/main/numerai/utils_usage_examples/plotting-example.ipynb
 
-    Output for the sample input: https://gcdnb.pbrd.co/images/3WsfRGOsLJZ0.png?o=1
-
     :param always_show_bin_ends: Whether to always show the bin end annotations.
         If False, we only show bin end for the last split in a cv-split.
     :param bin_end_offset: Since bin_end and bin_st of subsequent splits can overlap,
         we move the bin_end annotation back by this amount.
 
-    Sample input::
+    Sample input form 1::
+
+        Output for the sample input: https://gcdnb.pbrd.co/images/3WsfRGOsLJZ0.png?o=1
 
         cv_splits = [
             # cv 0
@@ -1377,40 +1377,56 @@ def plot_cv_split(
                 "test": (421, 601),
             },
     ]
+
+    Sample input form 2::
+
+        [
+            # label: [eras]
+            {"train": [1, 2, 3, 7, 8, 9], "test": [4, 5, 6]}, # cv 0
+            {"train": [4, 5, 6, 7], "test": [1, 2, 3, 8, 9]},  # cv 1
+        ]
+
     """
     cmap_cv = plt.cm.coolwarm
-
     n_splits = len(cv_splits)
     if ax is None:
         fig, ax = plt.subplots()
     # For each cv split
-    xmin = min(bin_st for cvs in cv_splits for bin_st, _ in cvs.values())
-    xmax = max(bin_end for cvs in cv_splits for _, bin_end in cvs.values())
+    xmin = min(min(era_rng) for cvs in cv_splits for era_rng in cvs.values())
+    xmax = max(max(era_rng) for cvs in cv_splits for era_rng in cvs.values())
     for i, ith_cv_split in enumerate(cv_splits):
-        # Fill in indices with the training/test groups
-        min_era = min(bin_st for bin_st, _ in ith_cv_split.values())
-        max_era = max(bin_end for _, bin_end in ith_cv_split.values())
+        # Fill in indices with the split groups
+        min_era = min(min(era_rng) for era_rng in ith_cv_split.values())
+        max_era = max(max(era_rng) for era_rng in ith_cv_split.values())
         indices = np.array([np.nan] * (max_era - min_era + 1))
         # For each split within a cv, ex: train, val, test
-        for j, (label, (bin_st, bin_end)) in enumerate(
-            sorted(ith_cv_split.items(), key=lambda kv: kv[1])
+        for j, (label, split_eras) in enumerate(
+            sorted(ith_cv_split.items(), key=lambda kv: min(kv[1]))
         ):
-            indices[bin_st - min_era : bin_end - min_era] = j
-            # annotate bin label
-            ax.annotate(
-                label,
-                xy=[bin_st, i + 0.8],
-                fontsize=annot_fontsize,
-            )
-            # annotate bin start
-            ax.annotate(str(bin_st), xy=[bin_st, i + 0.3], fontsize=annot_fontsize)
-            if always_show_bin_ends or j == len(ith_cv_split) - 1:
-                # annotate bin end only for the last label
+            if isinstance(split_eras, tuple):
+                era_bins = [split_eras]
+            else:
+                # We are given a list of eras
+                era_bins = _convert_to_bins(split_eras)
+            # For each era bin for this split (train/test) in this CV
+            # This is because train eras could be something like 1-100, 200-300
+            for bin_st, bin_end in era_bins:
+                indices[bin_st - min_era : bin_end - min_era + 1] = j
+                # annotate bin label
                 ax.annotate(
-                    str(bin_end),
-                    xy=[bin_end - bin_end_offset, i + 0.3],
+                    label,
+                    xy=[bin_st, i + 0.8],
                     fontsize=annot_fontsize,
                 )
+                # annotate bin start
+                ax.annotate(str(bin_st), xy=[bin_st, i + 0.3], fontsize=annot_fontsize)
+                if always_show_bin_ends or j == len(ith_cv_split) - 1:
+                    # annotate bin end only for the last label
+                    ax.annotate(
+                        str(bin_end),
+                        xy=[bin_end - bin_end_offset, i + 0.3],
+                        fontsize=annot_fontsize,
+                    )
         # Draw the lines
         ax.scatter(
             range(len(indices)),
@@ -1437,3 +1453,27 @@ def plot_cv_split(
     ax.set_ylabel(ylabel="CV iteration", fontsize=label_fontsize)
     ax.set_title(title, fontsize=title_fontsize)
     return ax
+
+
+def _convert_to_bins(nums) -> List[Tuple[int, int]]:
+    """Given a list of numbers, where there are multiple continuous sequences, convert
+    them to a list of bins.
+
+    Sample input::
+
+        [1, 2, 3, 8, 9, 10, 11, 25, 26, 27, 28, 29]
+
+    Sample output::
+
+        [(1, 3), (8, 11), (25, 29)]
+    """
+    bins = []
+    bin_st = nums[0]
+    for i, num in enumerate(nums):
+        if i == len(nums) - 1:
+            bins.append((bin_st, num))
+            break
+        if nums[i + 1] != num + 1:
+            bins.append((bin_st, num))
+            bin_st = nums[i + 1]
+    return bins
