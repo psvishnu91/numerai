@@ -1337,8 +1337,9 @@ def plot_cv_split(
     always_show_bin_ends=False,
     bin_end_offset=75,
     title="Cross-Validation Splits",
+    label_fontsize=14,
     annot_fontsize=12,
-    title_fontsize=15,
+    title_fontsize=16,
     ax=None,
 ):
     """Plot the train/val/test split of the eras.
@@ -1402,11 +1403,13 @@ def plot_cv_split(
                 fontsize=annot_fontsize,
             )
             # annotate bin start
-            ax.annotate(str(bin_st), xy=[bin_st, i + 0.3], fontsize=12)
+            ax.annotate(str(bin_st), xy=[bin_st, i + 0.3], fontsize=annot_fontsize)
             if always_show_bin_ends or j == len(ith_cv_split) - 1:
                 # annotate bin end only for the last label
                 ax.annotate(
-                    str(bin_end), xy=[bin_end - bin_end_offset, i + 0.3], fontsize=12
+                    str(bin_end),
+                    xy=[bin_end - bin_end_offset, i + 0.3],
+                    fontsize=annot_fontsize,
                 )
         # Draw the lines
         ax.scatter(
@@ -1430,5 +1433,7 @@ def plot_cv_split(
         ylim=[n_splits + 0.2, -0.2],
         xlim=[xmin - x_range * 0.1, xmax + x_range * 0.1],
     )
+    ax.set_xlabel(xlabel=xlabel, fontsize=label_fontsize)
+    ax.set_ylabel(ylabel="CV iteration", fontsize=label_fontsize)
     ax.set_title(title, fontsize=title_fontsize)
     return ax
