@@ -1018,7 +1018,6 @@ def refmt_predcol(col):
     else:
         return re.search(r"pred_target_(.*)", col).group(1)
 
-
 def compare_models_with_baseline(
     df: DF,
     competitor_predcols: List[str],
@@ -1028,8 +1027,10 @@ def compare_models_with_baseline(
     plot_erabinsz: int = 200,
     to_refmt_predcols: bool = False,
     figsize=(18, 8),
+    plot_title: Optional[str] = None,
     era_col: str = ERA_COL,
     include_legend: bool = True,
+    plot_pct_eraline: bool = False,
 ) -> Tuple[Any, pd.DataFrame]:
     """Provides erawise summary plots describing how good competitor_predcols are
     against baseline_col. Also provides a summary table.
@@ -1100,12 +1101,18 @@ def compare_models_with_baseline(
     mc_rescaled_df = (era_mdl_corr_df + 1.0) / 2.0
     improvement_df = mc_rescaled_df.sub(blc_rescaled, axis=0)
     if to_plot:
+        if plot_title is None:
+            _title = f"Δcorr2 = corr_model - corr_baseline\nBaseline: {baseline_col}"
+        else:
+            _title = plot_title
         fig = _plot_era_improvment(
             improvement_df,
             erabinsz=plot_erabinsz,
             figsize=figsize,
             era_col=era_col,
             include_legend=include_legend,
+            plot_pct_eraline=plot_pct_eraline,
+            title=_title,
         )
     else:
         fig = None
@@ -1134,6 +1141,7 @@ def _plot_era_improvment(
     title_fontsize=16,
     suptitle_fontsize=20,
     include_legend=True,
+    plot_pct_eraline=True,
 ) -> Any:
     """Plots the abs improvement over the baseline col for each predcol with
     seaborn or ploty.
@@ -1154,20 +1162,21 @@ def _plot_era_improvment(
     ymax = [improvement_df.max().max() * 1.3] * 2
     colors = plt.cm.rainbow(np.linspace(0, 1, better_df.shape[0]))
     for ax, col in zip(axes, improvement_df.columns):
-        ax2 = ax.twinx()
         # Scatter plot the percentage improvement over baseline
         sns.scatterplot(data=improvement_df[col], ax=ax, label="_nolegend_")
         ax.set_ylabel(ylabel, fontsize=axes_fontsize)
         ax.set_xlabel(xlabel, fontsize=axes_fontsize)
-        # Plot a line plot of percentage columns better than baseline in each era bin
-        sns.lineplot(
-            x=[bn.mid for bn in better_df.index],
-            y=better_df[col],
-            ax=ax2,
-            color="k",
-        )
-        ax2.set_ylabel(f"% {era_col.lower()} better", fontsize=axes_fontsize)
-        ax2.set_ylim([0, better_df.max().max() * 1.2])
+        if plot_pct_eraline:
+            ax2 = ax.twinx()
+            # Plot a line plot of percentage columns better than baseline in each era bin
+            sns.lineplot(
+                x=[bn.mid for bn in better_df.index],
+                y=better_df[col],
+                ax=ax2,
+                color="k",
+            )
+            ax2.set_ylabel(f"% {era_col.lower()} better", fontsize=axes_fontsize)
+            ax2.set_ylim([0, better_df.max().max() * 1.2])
         # Flood fill regions and show how often the combined is better than baseline
         for i, bn in enumerate(better_df.index):
             ax.fill_between(
@@ -1197,7 +1206,7 @@ def _plot_era_improvment(
             linestyle="--",
             label="Baseline model",
         )
-        if include_legend:
+        if include_legend and plot_pct_eraline:
             ax2.legend(
                 ["%Eras better than baseline in erabin"],
                 loc="upper left",
