@@ -20,6 +20,7 @@ import logging
 import pickle
 import sys
 import numerapi
+import numpy as np
 import pandas as pd
 # HACK: import all the functions from deploy_model.py
 from deploy_model import *
@@ -97,11 +98,13 @@ def predict(napi, wrapped_model):
     logger.info("reading prediction data")
     current_round = napi.get_current_round()
     dest_fl = f"{DATA_VERSION}/live_{current_round}.parquet"
-    napi.download_dataset(filename=f"{DATA_VERSION}/live.parquet", dest_path=dest_fl)
+    napi.download_dataset(filename=f"{DATA_VERSION}/live_int8.parquet", dest_path=dest_fl)
     logger.info(f"Downloaded live data to {dest_fl}...")
     predict_data = pd.read_parquet(dest_fl)
+    # XXX(visp|2023-07-08): To get past models working
+    predict_df = predict_data.filter(like="feature_").astype(np.int8)
     logger.info("generating predictions")
-    return wrapped_model.predict(predict_data)
+    return wrapped_model.predict(predict_df)
 
 
 def submit(predictions, model_id, predict_output_path=PREDICTIONS_PATH):
