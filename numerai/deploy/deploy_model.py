@@ -2,12 +2,16 @@ import logging
 import numpy as np
 import pandas as pd
 import scipy
+import warnings
+
 from tqdm import tqdm
+
+warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
 
 logger = logging.getLogger(__name__)
 
 
-class MultiTargetNeutralModel:
+class EnsembleNeutralModel:
     def __init__(
         self,
         models,
@@ -31,7 +35,9 @@ class MultiTargetNeutralModel:
             neutralisation_prop=self.neutralisation_prop,
         )
 
-
+# For backward compatability
+MultiTargetNeutralModel = EnsembleNeutralModel
+    
 def predict_ensemble(
     df,
     models,
@@ -42,6 +48,7 @@ def predict_ensemble(
 ):
     pred_cols = []
     df = df.copy()
+    df[features] = to_int8(df[features])
     for model_nm, model in tqdm(
         models.items(), desc="Predicting for each model", total=len(models)
     ):
@@ -68,6 +75,16 @@ def predict_ensemble(
     logger.info("Taking the rank percent")
     return pred.rank(pct=True).rename(columns={ensemble_col: "prediction"})
 
+
+def to_int8(df_feat):
+    """In pickle uploads the default dataset is float32"""
+    # check if any float32 values
+    if sum(df_feat.values.ravel() == 0.5) > 0:
+        return (df_feat * 4).astype(np.int8)
+    else:
+        return df_feat.astype(np.int8)
+        
+    
 
 def neutralize(
     df,
