@@ -28,13 +28,14 @@ local mc
 ``` bash
 # Example: 165.1.65.156
 IP=
-scp ~/.aws/personal_credentials ubuntu@${IP}:~/
+scp ~/.aws/credentials ubuntu@${IP}:~/
 ssh -A ubuntu@$IP
 ```
 Remote mc
 ``` bash
 mkdir ~/.aws/ 
-mv ~/personal_credentials ~/.aws/credentials 
+mv ~/credentials ~/.aws/credentials
+pip uninstall -y traitlets && pip install traitlets==5.9.0
 jupyter notebook --generate-config
 echo "c.NotebookApp.ip = '*'" >> /home/ubuntu/.jupyter/jupyter_notebook_config.py
 git clone https://github.com/vispz/numerai.git
